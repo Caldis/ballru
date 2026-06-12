@@ -513,6 +513,7 @@ const SCHEMA = [
   // 系统
   { k: 'clickPulse',  g: '系统', label: '点击脉冲',  type: 'toggle', def: true },
   { k: 'pulseForce',  g: '系统', label: '脉冲力度',  min: 0, max: 2000, step: 25, def: 950 },
+  { k: 'pityN',       g: '系统', label: '老虎机保底', min: 0, max: 20,   step: 1,  def: 8 },
   { k: 'holdPull',    g: '系统', label: '按住牵引力', min: 0, max: 1500, step: 25, def: 620 },
   { k: 'rightForce',  g: '系统', label: '右键斥力',  min: 0, max: 3000, step: 50, def: 1500 },
   { k: 'autoQuality', g: '系统', label: '自动降质',  type: 'toggle', def: true },
@@ -536,6 +537,7 @@ const meta = {
   ups: { dmg: 0, speed: 0, balls: 0, split: 0, comboW: 0, offline: 0 },
   coreUps: { dustX: 0, dmgX: 0, offCap: 0, meteorCap: 0 },
   counters: { meteorKills: 0, goldKills: 0, escapes: 0 },
+  slotPity: 0,
   ach: {},
   stats: { hits: 0, rings: 0, bestCombo: 0, deepestRing: 0, runs: 0, playMs: 0, supernovas: 0 },
   dustRate: 0,
@@ -693,7 +695,7 @@ function applySlotReward(sym, tier) {
 }
 
 const SAVE_KEY = 'ballru.save.v2';
-const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient', 'melody', 'customMelody', 'hitbox', 'slotChance', 'bossEvery'];
+const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient', 'melody', 'customMelody', 'hitbox', 'slotChance', 'bossEvery', 'pityN'];
 let flashOn = true; // 光敏防护(设置项,不进 P)
 let sessionDust = 0, dustWindow = 0, dustWindowT = 0;
 let suppressSave = false; // 清空/导入存档时压制 beforeunload 自动存档,防止覆盖
@@ -724,6 +726,7 @@ function loadGame() {
       Object.keys(meta.coreUps).forEach(k => { const d = CORE_UPS.find(u => u.k === k); meta.coreUps[k] = Math.max(0, Math.min(d ? d.max : 10, (j.meta.coreUps || {})[k] | 0)); });
       Object.assign(meta.counters, j.meta.counters || {});
       Object.assign(meta.ach, j.meta.ach || {});
+      meta.slotPity = +j.meta.slotPity || 0;
       Object.assign(meta.stats, j.meta.stats || {});
     }
     if (j.set) {
@@ -863,9 +866,16 @@ const audio = {
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.ok = true;
+    // 后台返回时 iOS/安卓会把上下文挂起为 suspended/interrupted,状态一变就尝试唤醒
+    this.c.addEventListener('statechange', () => { if (!document.hidden) ensureAudioAlive(); });
     this.setAmbient(P.ambient);
   },
-  resume() { this.init(); if (this.ok && this.c.state === 'suspended') this.c.resume(); },
+  resume() {
+    this.init();
+    if (this.ok && (this.c.state === 'suspended' || this.c.state === 'interrupted')) {
+      this.c.resume().catch(() => {});
+    }
+  },
   blip(freq, vel, decay, pan = 0, t1 = 'sine', t2 = 'triangle', when = 0) {
     if (!this.ok || vel <= 0) return;
     const t = this.c.currentTime + when;
@@ -1125,19 +1135,25 @@ function makeArcRing(i, R, r0, rr) {
   setRingColor(ring);
   return ring;
 }
-/* Boss 环:单段全圆弧、巨量集中血、无缺口(必须正面击破),击破必出 LUCKY SPIN */
+/* Boss 环:单段全圆弧、巨量集中血、无缺口,击破必出 LUCKY SPIN
+ * 三型:wall 壁垒 / laser 激光扫射(光束击退球+断连击) / split 半血分裂为双旋刃 */
 function makeBossRing(i, R, r0, rr) {
   const baseHp = Math.ceil(Math.pow(1.22, i - 2));
   const hp = baseHp * 46;
+  const tv = rr();
+  const bossType = tv < .45 ? 'wall' : tv < .75 ? 'laser' : 'split';
   const segs = [{
     a0: rr() * TAU, len: TAU - .001, hp, maxHp: hp, alive: true, flashT: 0,
     dv: (1 + i * .6) * 120, dR: 0, dir: 1, phase: 0,
   }];
   const ring = {
-    kind: 'arc', boss: true, idx: i, R, n: 1, alive: 1, pr: r0 * 1.7, segs,
+    kind: 'arc', boss: true, bossType, idx: i, R, n: 1, alive: 1, pr: r0 * 1.7, segs,
     rot: 0, rotSpeed: .05, breath: 0, breathT: 0,
     band: r0 * 2.2, broken: false, baseHp, hpSum: hp, hpMax: hp, announced: false,
   };
+  if (bossType === 'laser') {
+    ring.laser = { n: rr() < .4 ? 3 : 2, rot: rr() * TAU, speed: (rr() < .5 ? -1 : 1) * (.12 + rr() * .1) };
+  }
   setRingColor(ring);
   return ring;
 }
@@ -1159,6 +1175,24 @@ function damageArcSeg(ring, seg, src, mult = 1) {
   ring.hpSum = Math.max(0, ring.hpSum - dealt);
   seg.flashT = .14;
   awardDust(seg.dv * (dealt / seg.maxHp) * dustMult() * (1 + world.combo * .01));
+  // 分裂 Boss:半血相变 → 双旋刃(转速×4,出现缺口可穿,也可继续击杀)
+  if (ring.boss && ring.bossType === 'split' && !ring.didSplit && ring.hpSum <= ring.hpMax * .5) {
+    ring.didSplit = true;
+    const rem = Math.max(ring.hpSum, ring.baseHp * 6);
+    const mk = a0 => ({
+      a0, len: TAU * .36, hp: rem / 2, maxHp: rem / 2, alive: true, flashT: .2,
+      dv: seg.dv / 2, dR: 0, dir: 1, phase: 0,
+    });
+    ring.segs = [mk(0), mk(Math.PI)];
+    ring.n = 2; ring.alive = 2;
+    ring.hpSum = rem;
+    ring.rotSpeed *= 4;
+    spawnWave(0, 0, ring.hue, ring.R * .8, ring.R * 1.5, 14, .6);
+    addTrauma(.4 * P.shakeAmp);
+    audio.zap(0); audio.thump(0);
+    banner('⚠ BOSS 分裂', '双刃高速旋转 · 缺口可穿', ring.hue);
+    return false;
+  }
   const gg = segGeom(ring, seg);
   const sx = src ? src.x : Math.cos(gg[0] + gg[1] / 2) * gg[2];
   const sy = src ? src.y : Math.sin(gg[0] + gg[1] / 2) * gg[2];
@@ -1446,7 +1480,7 @@ function shatterRing(ring) {
   if (P.slowmoTime > 0) smT = P.slowmoTime * runMods.slowmoX;
   banner(ring.boss ? '👑 BOSS DOWN' : `RING ${ring.idx + 1} SHATTERED`, `+${bonus.toLocaleString()} BONUS`, ring.hue);
   audio.shatter(ring.idx);
-  if (ring.boss) triggerSlot('boss');
+  if (ring.boss) { triggerSlot('boss'); setHighlight(`👑 BOSS DOWN · RING ${ring.idx + 1}`); }
   const se = P.splitEvery > 0 ? Math.max(1, P.splitEvery - meta.ups.split - runMods.splitCut) : 0;
   if (se > 0 && (ring.idx + 1) % se === 0 && world.balls.length < P.maxBalls) {
     spawnBall();
@@ -1621,6 +1655,30 @@ function step(dt) {
     ring.rot += ring.rotSpeed * dt;
     if (ring.breath) ring.breathT += dt;
     for (const seg of ring.segs) if (seg.flashT > 0) seg.flashT -= dt;
+    // 激光 Boss:旋转光束扫到球 → 击退向心 + 断连击(Boss 的反制)
+    if (ring.laser) {
+      ring.laser.rot += ring.laser.speed * dt;
+      for (const b of world.balls) {
+        if (b.laserCd > 0) continue;
+        const bd = Math.hypot(b.x, b.y);
+        if (bd > ring.R - ring.pr || bd < 40) continue;
+        const ba = Math.atan2(b.y, b.x);
+        for (let k = 0; k < ring.laser.n; k++) {
+          let diff = ba - (ring.laser.rot + k * TAU / ring.laser.n);
+          diff = ((diff % TAU) + TAU) % TAU;
+          if (diff > Math.PI) diff = TAU - diff;
+          if (diff * bd < 13 + b.r) {
+            b.laserCd = .7;
+            b.vx += -b.x / bd * 640; b.vy += -b.y / bd * 640;
+            world.combo = 0;
+            spawnSparks(b.x, b.y, 8, 10, 320);
+            addTrauma(.15 * P.shakeAmp);
+            audio.blip(110, .28, .18, panOf(b.x), 'sawtooth', 'square');
+            break;
+          }
+        }
+      }
+    }
   }
   // 限时增益倒计时
   for (let i = buffsActive.length - 1; i >= 0; i--) {
@@ -1631,7 +1689,8 @@ function step(dt) {
   const actRing = world.rings[world.act];
   if (actRing && actRing.boss && !actRing.announced) {
     actRing.announced = true;
-    banner('⚠ BOSS RING', '封闭壁垒 · 击破必出 LUCKY SPIN', actRing.hue);
+    const subByType = { wall: '封闭壁垒 · 击破必出 LUCKY SPIN', laser: '激光扫射 · 光束击退并断连击', split: '半血分裂双刃 · 击破必出 LUCKY SPIN' };
+    banner('⚠ BOSS RING', subByType[actRing.bossType] || subByType.wall, actRing.hue);
     audio.thump(0);
     addTrauma(.25 * P.shakeAmp);
   }
@@ -1707,6 +1766,7 @@ function step(dt) {
   }
   for (const b of world.balls) {
     b.r = P.ballRadius;
+    if (b.laserCd > 0) b.laserCd -= dt;
     let sp = Math.hypot(b.vx, b.vy) || 1;
     if (Math.abs(P.gravity) < 1) {
       const k = ts / sp; b.vx *= k; b.vy *= k; sp = ts;
@@ -1860,6 +1920,7 @@ function supernova() {
   }
   audio.nova();
   banner('SUPERNOVA', `+${g} ◉ 核心已收获`, 48);
+  setHighlight(`☀ SUPERNOVA +${g} ◉`);
   checkAch();
   saveGame();
 }
@@ -2071,6 +2132,24 @@ function drawPelletRing(c, ring) {
 }
 function drawArcRing(c, ring) {
   c.lineCap = 'round';
+  // 激光 Boss 光束(由环向心发射,常亮可预判)
+  if (ring.laser && !ring.broken) {
+    const pulse = .7 + .3 * Math.sin(nowSec * 9);
+    for (let k = 0; k < ring.laser.n; k++) {
+      const a = ring.laser.rot + k * TAU / ring.laser.n;
+      const x1 = Math.cos(a) * 36, y1 = Math.sin(a) * 36;
+      const x2 = Math.cos(a) * (ring.R - ring.pr), y2 = Math.sin(a) * (ring.R - ring.pr);
+      c.globalAlpha = .22 * pulse;
+      c.strokeStyle = 'hsl(8,100%,58%)';
+      c.lineWidth = 14;
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+      c.globalAlpha = .85 * pulse;
+      c.strokeStyle = 'hsl(22,100%,72%)';
+      c.lineWidth = 3.2;
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+    }
+    c.globalAlpha = 1;
+  }
   for (const seg of ring.segs) {
     if (!seg.alive) continue;
     const g = segGeom(ring, seg);
@@ -2687,9 +2766,19 @@ function runSlot() {
   $('#slotQ').textContent = slotQueue.length ? `+${slotQueue.length}` : '';
   const card = $('#slotCard');
   card.classList.remove('win', 'reach');
-  $('#slotMsg').textContent = '点击转轮可提前停轮';
   // 结果用 gameplay RNG(保种子确定性);填充格用 Math.random(纯视觉)
-  const res = [rollSymbol(), rollSymbol(), rollSymbol()];
+  let res = [rollSymbol(), rollSymbol(), rollSymbol()];
+  // 保底:连续 pityN-1 次未中三连,本转必出三连(随机符号)
+  const pityHit = P.pityN > 0 && meta.slotPity >= P.pityN - 1;
+  if (pityHit) { const fs = rollSymbol(); res = [fs, fs, fs]; }
+  if (pityHit) {
+    card.classList.add('reach');
+    $('#slotMsg').innerHTML = '<b>✨ 保底触发!必出三连!</b>';
+  } else {
+    $('#slotMsg').textContent = P.pityN > 0
+      ? `点击转轮可提前停轮 · 保底 ${Math.min(meta.slotPity + 1, P.pityN)}/${P.pityN}`
+      : '点击转轮可提前停轮';
+  }
   const reach = res[0].k === res[1].k;
   const LAND = 16;
   const reels = [];
@@ -2776,6 +2865,7 @@ function settleSlot() {
   else if (a.k === b.k) { tier = 1; sym = a; }
   else if (b.k === c.k) { tier = 1; sym = b; }
   else if (a.k === c.k) { tier = 1; sym = a; }
+  meta.slotPity = tier === 2 ? 0 : (meta.slotPity || 0) + 1;
   const msg = applySlotReward(sym, tier);
   $('#slotMsg').innerHTML = `<b>${msg}</b>`;
   if (tier === 2) {
@@ -2785,6 +2875,7 @@ function settleSlot() {
     addTrauma((sym.k === 'seven' ? 1 : .6) * P.shakeAmp);
     if (P.slowmoTime > 0) smT = Math.max(smT, .5);
     banner(sym.k === 'seven' ? '🎰 JACKPOT 777' : `🎰 ${sym.icon} ${sym.icon} ${sym.icon} 大当たり`, msg.replace(/<[^>]*>/g, ''), 48);
+    setHighlight(sym.k === 'seven' ? '🎰 JACKPOT 777' : `🎰 三连 ${sym.icon}${sym.icon}${sym.icon}`);
     audio.fanfare(true);
     spawnWave(0, 0, 48, 10, 520, 18, .8);
   } else if (tier === 1) {
@@ -2813,6 +2904,93 @@ document.querySelectorAll('#slot .reel').forEach(el => {
     r.early = { t0: now, dur: 240, from: S.land * S.cell * easeOutCubic(k) };
   });
 });
+
+/* ── 📸 战绩分享卡(1080×1350,实况画面做底) ── */
+let lastHighlight = null;
+function setHighlight(text) { lastHighlight = { text, t: Date.now() }; }
+function drawShareCard() {
+  const cw = 1080, ch = 1350;
+  const cc = document.createElement('canvas');
+  cc.width = cw; cc.height = ch;
+  const x = cc.getContext('2d');
+  x.textBaseline = 'top';
+  x.fillStyle = '#05070f'; x.fillRect(0, 0, cw, ch);
+  // 实况画面 cover 裁切打底
+  const sr = cv.width / cv.height, tr = cw / ch;
+  let sw, sh, sx0, sy0;
+  if (sr > tr) { sh = cv.height; sw = sh * tr; sx0 = (cv.width - sw) / 2; sy0 = 0; }
+  else { sw = cv.width; sh = sw / tr; sx0 = 0; sy0 = (cv.height - sh) / 2; }
+  x.drawImage(cv, sx0, sy0, sw, sh, 0, 0, cw, ch);
+  x.fillStyle = 'rgba(4,6,15,.74)'; x.fillRect(0, 0, cw, ch);
+  // 装饰圆点环
+  x.globalCompositeOperation = 'lighter';
+  x.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    x.globalAlpha = .16;
+    x.strokeStyle = `hsl(${20 + i * 45},90%,60%)`;
+    x.lineWidth = 9;
+    x.setLineDash([1, 26]);
+    x.beginPath(); x.arc(cw / 2, ch * .47, 330 + i * 130, 0, TAU); x.stroke();
+  }
+  x.setLineDash([]); x.globalAlpha = 1;
+  x.globalCompositeOperation = 'source-over';
+  const F = (w, s) => `${w} ${s}px Bahnschrift,"Arial Narrow",sans-serif`;
+  const LS = v => { try { x.letterSpacing = v; } catch (e) {} };
+  x.textAlign = 'center';
+  x.fillStyle = '#f2f6ff'; x.font = F(700, 116); LS('0.08em');
+  x.fillText('BALLRU', cw / 2, 64);
+  x.fillStyle = '#7785a8'; x.font = F(700, 24); LS('0.5em');
+  x.fillText('ORBITAL SHATTER · 环爆模拟', cw / 2, 206);
+  LS('0.04em');
+  const hl = lastHighlight && Date.now() - lastHighlight.t < 300000 ? lastHighlight.text : '⚡ 战绩快照';
+  x.fillStyle = 'hsl(48,100%,66%)'; x.font = F(700, 60);
+  x.fillText(hl, cw / 2, 296);
+  x.fillStyle = '#ffffff'; x.font = F(700, 132); LS('0em');
+  x.fillText(Math.round(world.score).toLocaleString(), cw / 2, 396);
+  x.fillStyle = '#7785a8'; x.font = F(700, 22); LS('0.4em');
+  x.fillText('SCORE', cw / 2, 546);
+  // 战绩网格 2×3
+  const cells = [
+    ['RING ' + (world.act + 1), '当前环'], ['×' + fmtN(world.bestCombo), '本局最高连击'],
+    [fmtN(meta.totalDust), '累计星尘'], [fmtN(meta.cores) + ' ◉', '核心'],
+    [fmtN(meta.stats.supernovas), '超新星'], [fmtN(meta.counters.escapes), '越狱'],
+  ];
+  cells.forEach(([v, l], i) => {
+    const cx = cw * (i % 2 ? .73 : .27), cy = 660 + Math.floor(i / 2) * 160;
+    x.fillStyle = '#f2f6ff'; x.font = F(700, 58); LS('0.02em');
+    x.fillText(v, cx, cy);
+    x.fillStyle = '#7785a8'; x.font = F(700, 20); LS('0.3em');
+    x.fillText(l, cx, cy + 74);
+  });
+  x.fillStyle = 'hsl(48,95%,62%)'; x.font = F(700, 27); LS('0.06em');
+  x.fillText(`SEED ${seed} —— 输入同一种子,挑战同一局`, cw / 2, 1170);
+  x.fillStyle = '#c9d5ef'; x.font = F(700, 33); LS('0.12em');
+  x.fillText('caldis.github.io/ballru', cw / 2, 1224);
+  x.fillStyle = '#5e6b8c'; x.font = F(700, 20); LS('0.2em');
+  const d = new Date();
+  x.fillText(`${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`, cw / 2, 1284);
+  LS('0em');
+  return cc;
+}
+function shareCard() {
+  drawShareCard().toBlob(async blob => {
+    if (!blob) { toast('生成失败'); return; }
+    const file = new File([blob], `ballru-${seed}.png`, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'BALLRU 战绩' });
+        toast('已调起系统分享');
+        return;
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ballru-card-${seed}-${Date.now()}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('战绩卡已保存 PNG');
+  });
+}
 
 /* ── 菜单系统 ──────────────────────────── */
 const fmtN = n => Math.floor(n).toLocaleString();
@@ -2872,6 +3050,7 @@ function renderHome() {
     }));
   }
   nav.appendChild(mkBtn(`✦ 升级商店<small>${fmtN(meta.dust)} 星尘</small>`, () => showPage('shop')));
+  nav.appendChild(mkBtn('📸 生成战绩卡<small>分享/下载</small>', shareCard));
   nav.appendChild(mkBtn('⚙ 设置', () => showPage('set')));
   nav.appendChild(mkBtn('📊 统计', () => showPage('stats')));
   nav.appendChild(mkBtn('💾 存档管理', () => showPage('save')));
@@ -3057,6 +3236,9 @@ function renderStats() {
         <div><div class="shopName">${a.name}</div><div class="shopDesc">${a.desc}</div></div>
         <div class="shopDesc">${on ? '已解锁' : ''}</div></div>`;
     }).join('');
+  const cardBtn = mkBtn('📸 生成战绩卡(分享/下载)', shareCard);
+  cardBtn.style.marginTop = '12px';
+  el.appendChild(cardBtn);
 }
 function renderSavePage() {
   const el = $('#saveBody');
@@ -3201,7 +3383,19 @@ addEventListener('pointercancel', e => { touchIds.delete(e.pointerId); pointer.d
 cv.addEventListener('contextmenu', e => e.preventDefault());
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => showPage('home'));
 addEventListener('beforeunload', saveGame);
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
+/* 修复:手机最小化网页后返回无声 —— 多重兜底唤醒 AudioContext */
+function ensureAudioAlive() {
+  if (!audio.ok || !audio.c) return;
+  const st = audio.c.state;
+  if (st === 'suspended' || st === 'interrupted') audio.c.resume().catch(() => {});
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) saveGame();
+  else ensureAudioAlive();
+});
+addEventListener('pageshow', ensureAudioAlive);   // iOS bfcache 返回
+addEventListener('focus', ensureAudioAlive);
+addEventListener('pointerdown', ensureAudioAlive, { capture: true }); // 返回后任意触摸兜底(满足手势要求)
 $('#tHide').onclick = toggleTuner;
 $('#tunerTab').onclick = toggleTuner;
 $('#impApply').onclick = applyImport;
@@ -3288,6 +3482,7 @@ window.BALLRU = {
   get melody() { return { notes: melodyNotes, ptr: melodyPtr }; },
   get buffs() { return buffsActive; },
   slot: triggerSlot,
+  card: drawShareCard,
   save: saveGame, restart, supernova, openMenu,
   dust(n) { meta.dust += n; meta.totalDust += n; updateMenuCurrency(); },
 };
