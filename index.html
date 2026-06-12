@@ -267,6 +267,62 @@ body.bare #draft{display:none}
 .dCard .dd{font-size:10.5px;color:var(--dim);line-height:1.4}
 .dCard .dk{font-size:9px;color:var(--dim);margin-top:6px;letter-spacing:.15em}
 
+/* ── 🎰 LUCKY SPIN(柏青哥风老虎机) ──────── */
+#slot{
+  position:fixed;top:12vh;left:50%;z-index:26;
+  transform:translateX(-50%) translateY(-40vh) scale(.5);opacity:0;pointer-events:none;
+  transition:transform .55s cubic-bezier(.34,1.56,.64,1),opacity .3s;
+}
+#slot.show{opacity:1;transform:translateX(-50%) translateY(0) scale(1);pointer-events:auto}
+.slotCard{
+  position:relative;padding:13px 18px 12px;border-radius:18px;
+  background:linear-gradient(160deg,#221035,#0a0a18 55%,#231022);
+  border:2px solid #ffd76a;
+  box-shadow:0 0 34px rgba(255,200,80,.4),inset 0 0 26px rgba(255,150,60,.1);
+}
+.slotCard.reach{
+  border-color:#ff5a7a;
+  box-shadow:0 0 50px rgba(255,80,120,.65),inset 0 0 30px rgba(255,80,120,.15);
+}
+.slotCard.win{animation:winGlow .35s infinite alternate}
+@keyframes winGlow{
+  from{box-shadow:0 0 36px rgba(255,215,106,.7);filter:hue-rotate(0deg)}
+  to{box-shadow:0 0 70px rgba(255,110,190,.9);filter:hue-rotate(50deg)}
+}
+.slotCard.shake{animation:cardShake .16s}
+@keyframes cardShake{
+  0%,100%{translate:0 0}25%{translate:-5px 2px}50%{translate:5px -2px}75%{translate:-3px 1px}
+}
+.slotLights{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+.slotLights i{
+  width:7px;height:7px;border-radius:50%;background:#ffd76a;color:#ffd76a;
+  animation:blink .7s infinite;
+}
+.slotLights i:nth-child(odd){animation-delay:.35s}
+.reach .slotLights i{animation-duration:.22s;background:#ff5a7a;color:#ff5a7a}
+.win .slotLights i{animation-duration:.14s}
+@keyframes blink{0%,40%{opacity:1;box-shadow:0 0 9px currentColor}60%,100%{opacity:.12;box-shadow:none}}
+.slotTitle{
+  text-align:center;font-size:11px;letter-spacing:.42em;text-indent:.42em;
+  color:#ffd76a;margin-bottom:10px;font-weight:700;
+}
+.slotTitle b{color:#ff9d5a}
+.slotReels{display:flex;gap:10px;justify-content:center}
+.reel{
+  width:76px;height:88px;overflow:hidden;border-radius:10px;position:relative;
+  background:#05060d;border:1px solid rgba(255,215,106,.35);cursor:pointer;
+}
+.reel::after{
+  content:'';position:absolute;inset:0;pointer-events:none;border-radius:10px;
+  background:linear-gradient(#05060d,transparent 32%,transparent 68%,#05060d);
+}
+.reelStrip{will-change:transform}
+.reelStrip div{height:88px;display:grid;place-items:center;font-size:42px;color:#f2f6ff;font-weight:700}
+.reel.spin .reelStrip{filter:blur(2px)}
+.reel.stopped{border-color:#ffd76a;box-shadow:0 0 16px rgba(255,215,106,.5),inset 0 0 12px rgba(255,215,106,.18)}
+.slotMsg{margin-top:10px;text-align:center;font-size:12.5px;color:var(--tx);min-height:17px;letter-spacing:.04em}
+.slotMsg b{color:#ffd76a}
+
 /* ── 小屏适配 ───────────────────────────── */
 @media (max-width:600px){
   .dRow{flex-wrap:wrap;justify-content:center}
@@ -277,6 +333,8 @@ body.bare #draft{display:none}
   .menuCard{max-height:58vh}
   #tuner{width:min(94vw,304px)}
   #tunerTab{top:8px;right:8px}
+  .reel{width:60px;height:72px}
+  .reelStrip div{height:72px;font-size:32px}
 }
 
 /* ── 弹出层 / Toast ─────────────────────── */
@@ -364,6 +422,20 @@ body.bare #draft{display:none}
     </div>
   </div>
 </div>
+<div id="slot">
+  <div class="slotCard" id="slotCard">
+    <div class="slotLights">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <div class="slotTitle">✦ LUCKY SPIN ✦ <b id="slotQ"></b></div>
+    <div class="slotReels">
+      <div class="reel" data-i="0"><div class="reelStrip"></div></div>
+      <div class="reel" data-i="1"><div class="reelStrip"></div></div>
+      <div class="reel" data-i="2"><div class="reelStrip"></div></div>
+    </div>
+    <div class="slotMsg" id="slotMsg"></div>
+  </div>
+</div>
 <div id="draft">
   <div class="dTitle">破环强化 · 三选一 <b id="dCount"></b></div>
   <div class="dRow" id="dRow"></div>
@@ -411,6 +483,8 @@ const SCHEMA = [
   { k: 'pelletSize',    g: '世界', label: '粒子半径◆',  min: 2.5,  max: 18,  step: 0.5,  def: 7,   rebuild: true },
   { k: 'pelletSpacing', g: '世界', label: '粒子间距◆',  min: 1.05, max: 4,   step: 0.05, def: 1.5, rebuild: true },
   { k: 'shatterAt',     g: '世界', label: '碎裂阈值%',  min: 5,    max: 95,  step: 1,    def: 30 },
+  { k: 'slotChance',    g: '世界', label: '幸运币概率%', min: 0,   max: 5,   step: 0.05, def: 0.8, rebuild: true },
+  { k: 'bossEvery',     g: '世界', label: 'Boss环周期',  min: 0,   max: 12,  step: 1,    def: 6,   rebuild: true },
   { k: 'hueBase',       g: '世界', label: '起始色相',   min: 0,    max: 360, step: 1,    def: 16,  change: 'recolor' },
   { k: 'hueStep',       g: '世界', label: '色相步进',   min: 0,    max: 120, step: 1,    def: 26,  change: 'recolor' },
   // 镜头
@@ -519,10 +593,11 @@ const UPS = [
   { k: 'offline', icon: '☾', name: '离线星核', max: 5, base: 250, desc: l => `离线收益效率 ${30 + l * 14}%` },
 ];
 const upCost = (def, lvl) => Math.round(def.base * Math.pow(1.65, lvl));
-const dustMult = () => (1 + meta.skills.midas * 0.2) * (1 + meta.cores * 0.1) * (1 + runMods.midas) * (1 + meta.coreUps.dustX * 0.25);
+// 核心数对星尘/球速的加成设软上限:防调参台极端参数(如碰撞体积调最低)刷出天文数字后核爆经济
+const dustMult = () => (1 + meta.skills.midas * 0.2) * (1 + Math.min(meta.cores, 200) * 0.1) * (1 + runMods.midas) * (1 + meta.coreUps.dustX * 0.25) * buffX('midas');
 const comboWindow = () => 1.05 + meta.ups.comboW * 0.15 + runMods.comboW;
-const novaGain = () => world.ringsBroken >= 10 ? Math.floor(Math.pow(world.ringsBroken - 8, 1.5)) : 0;
-const ballDamage = () => Math.pow(1.35, meta.ups.dmg) * (1 + runMods.dmg) * (1 + meta.cores * 0.05) * (1 + meta.coreUps.dmgX * 0.2);
+const novaGain = () => world.ringsBroken >= 10 ? Math.min(500, Math.floor(Math.pow(world.ringsBroken - 8, 1.5))) : 0;
+const ballDamage = () => Math.pow(1.35, meta.ups.dmg) * (1 + runMods.dmg) * (1 + meta.cores * 0.05) * (1 + meta.coreUps.dmgX * 0.2) * buffX('dmg');
 
 /* ── 本局强化(破环 3 选 1,roguelite 选牌) ── */
 const runModsDef = () => ({ dmg: 0, midas: 0, speed: 0, comboW: 0, stormJump: 0, stormFast: 0, meteorX: 1, wellX: 1, splitCut: 0, slowmoX: 1 });
@@ -541,8 +616,84 @@ const DRAFTS = [
   { icon: '🕰', name: '时滞领域', desc: '慢动作时长 +40%', apply: () => runMods.slowmoX += .4 },
 ];
 
+/* ── 限时增益(老虎机奖励的载体,上限远高于选牌) ── */
+let buffsActive = [];
+function addBuff(k, icon, name, x, dur) {
+  const b = buffsActive.find(b => b.k === k);
+  if (b) { b.x = Math.max(b.x, x); b.t = Math.max(b.t, dur); b.dur = Math.max(b.dur, dur); }
+  else buffsActive.push({ k, icon, name, x, t: dur, dur });
+}
+const buffX = k => { const b = buffsActive.find(b => b.k === k); return b ? b.x : 1; };
+
+/* ── 🎰 老虎机奖励模型(独立于三选一:随机、瞬时/限时、上限更大) ── */
+const SLOT_SYMBOLS = [
+  { k: 'dust',   icon: '✦', w: 26 },
+  { k: 'dmg',    icon: '✸', w: 18 },
+  { k: 'meteor', icon: '☄', w: 15 },
+  { k: 'storm',  icon: '⌁', w: 13 },
+  { k: 'ball',   icon: '●', w: 10 },
+  { k: 'core',   icon: '◉', w: 8 },
+  { k: 'seven',  icon: '7', w: 5 },
+];
+const SLOT_W_TOTAL = SLOT_SYMBOLS.reduce((a, s) => a + s.w, 0);
+function rollSymbol() {
+  let r = rng() * SLOT_W_TOTAL;
+  for (const s of SLOT_SYMBOLS) { r -= s.w; if (r <= 0) return s; }
+  return SLOT_SYMBOLS[0];
+}
+/* tier: 0 安慰奖 / 1 对子 / 2 三连。返回结算文案 */
+function applySlotReward(sym, tier) {
+  const d = world.ringsBroken + 1, dm = dustMult();
+  const give = n => { const v = Math.round(n); awardDust(v); return v; };
+  if (tier === 0) return `安慰奖 ✦ ${give(15 * d * dm).toLocaleString()}`;
+  switch (sym.k) {
+    case 'dust': {
+      const v = give((tier === 1 ? 90 : 550) * d * dm);
+      if (tier === 2) for (let i = 0; i < 30; i++) spawnSparks((rng() - .5) * 400, (rng() - .5) * 400, 48, 2, 320);
+      return `星尘${tier === 2 ? '暴雨' : '雨'} ✦ ${v.toLocaleString()}`;
+    }
+    case 'dmg':
+      addBuff('dmg', '✸', '狂暴', tier === 1 ? 2 : 4, tier === 1 ? 20 : 32);
+      return `狂暴:伤害 ×${tier === 1 ? 2 : 4} · ${tier === 1 ? 20 : 32}s`;
+    case 'meteor': {
+      addBuff('meteor', '☄', '流星风暴', tier === 1 ? 3 : 5, tier === 1 ? 25 : 35);
+      if (tier === 2) {
+        let n = 0;
+        for (const f of world.flyers) { if (!f.meteor && n < 60) { f.meteor = 2; f.col = f.col.replace(/,\d+%\)/, ',78%)'); n++; } }
+      }
+      return `流星风暴 ×${tier === 1 ? 3 : 5} · ${tier === 1 ? 25 : 35}s`;
+    }
+    case 'storm': {
+      addBuff('storm', '⌁', '雷暴超载', tier === 1 ? 2 : 3, tier === 1 ? 25 : 35);
+      if (tier === 2) for (let i = 0; i < 4; i++) { const b = world.balls[i % world.balls.length]; if (b) lightning(b); }
+      return `雷暴超载 ×${tier === 1 ? 2 : 3} · ${tier === 1 ? 25 : 35}s`;
+    }
+    case 'ball': {
+      const n = tier === 1 ? 1 : 3;
+      for (let i = 0; i < n && world.balls.length < P.maxBalls + 4; i++) spawnBall();
+      return `分裂 +${n} 球!`;
+    }
+    case 'core': {
+      const n = tier === 1 ? 1 : 5;
+      meta.cores += n;
+      return `核心 +${n} ◉`;
+    }
+    case 'seven': {
+      if (tier === 1) return `幸运 7 ✦ ${give(250 * d * dm).toLocaleString()}`;
+      // 777 JACKPOT:全家桶
+      meta.cores += 8;
+      const v = give(1500 * d * dm);
+      addBuff('dmg', '✸', '狂暴', 3, 18);
+      addBuff('meteor', '☄', '流星风暴', 4, 18);
+      addBuff('midas', '👑', '点金时代', 4, 18);
+      return `🎉 JACKPOT!◉+8 ✦${v.toLocaleString()} 全增益 18s`;
+    }
+  }
+  return '';
+}
+
 const SAVE_KEY = 'ballru.save.v2';
-const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient', 'melody', 'customMelody', 'hitbox'];
+const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient', 'melody', 'customMelody', 'hitbox', 'slotChance', 'bossEvery'];
 let flashOn = true; // 光敏防护(设置项,不进 P)
 let sessionDust = 0, dustWindow = 0, dustWindowT = 0;
 let suppressSave = false; // 清空/导入存档时压制 beforeunload 自动存档,防止覆盖
@@ -795,6 +946,13 @@ const audio = {
     [0, 4, 7, 12].forEach((semi, i) =>
       this.blip(440 * Math.pow(2, semi / 12), .3, .4, 0, 'triangle', 'sine', .055 * i));
   },
+  slotTick() { this.blip(1350, .04, .03, 0, 'square', 'sine'); },
+  slotStop() { this.blip(200, .22, .12, 0, 'square', 'triangle'); },
+  fanfare(big) {
+    const ns = big ? [0, 4, 7, 12, 16, 19, 24] : [0, 4, 7, 12];
+    ns.forEach((s, i) => this.blip(330 * Math.pow(2, s / 12), .28, .5, 0, 'triangle', 'sine', i * .07));
+    if (big) this.thump(0);
+  },
   zap(pan) {
     if (!this.ok) return;
     const t = this.c.currentTime;
@@ -870,7 +1028,7 @@ const BALL_PAL = [46, 320, 192, 120, 268, 14, 88, 230, 350, 160, 60, 300];
 const MILESTONES = new Set([25, 50, 100, 200, 400, 800, 1600]);
 
 const targetSpeed = () => P.ballSpeed * Math.min(Math.pow(1 + P.speedGain / 100, world.ringsBroken), 2.4)
-  * (1 + meta.ups.speed * 0.08) * (1 + meta.cores * 0.02) * (1 + runMods.speed);
+  * (1 + meta.ups.speed * 0.08) * (1 + Math.min(meta.cores, 100) * 0.02) * (1 + runMods.speed);
 const flyerCap = () => quality === 2 ? 650 : quality === 1 ? 450 : 280;
 const sparkMul = () => quality === 2 ? 1 : quality === 1 ? .6 : .3;
 
@@ -886,6 +1044,8 @@ function makeRing(i) {
   const r0 = P.pelletSize;
   const n = Math.max(8, Math.min(2600, Math.floor(TAU * R / (r0 * 2 * P.pelletSpacing))));
   const rr = mulberry32((seed ^ 0x9E37) + i * 7919);
+  // Boss 环:整环一条血的封闭壁垒,击破必触发老虎机
+  if (P.bossEvery > 0 && i >= 3 && (i + 1) % P.bossEvery === 0) return makeBossRing(i, R, r0, rr);
   // 环形态:前 3 环固定圆点;之后 18% 弧线刃环,其余粒子环按形态分布(圆点/线条/尖刺)
   const kindRoll = rr();
   if (i >= 3 && kindRoll < .18) return makeArcRing(i, R, r0, rr);
@@ -914,6 +1074,12 @@ function makeRing(i) {
     const p = pellets[Math.floor((h + .5) / healerCount * n) % n];
     p.type = 2; p.hp = p.maxHp = baseHp * 2; p.dv = (1 + i * .6) * 3;
     healers.push(p.i);
+  }
+  // 🎰 幸运币:击碎即触发老虎机(概率由调参台 slotChance 控制)
+  if (P.slotChance > 0) {
+    for (const p of pellets) {
+      if (p.type === 0 && rr() < P.slotChance / 100) { p.type = 4; p.dv *= 4; }
+    }
   }
   let hpMax = 0;
   for (const p of pellets) hpMax += p.maxHp;
@@ -955,6 +1121,22 @@ function makeArcRing(i, R, r0, rr) {
     breath, breathT: 0,
     band: r0 * 1.5 + (layers === 2 ? r0 * 1.7 : 0),
     broken: false, baseHp, hpSum: hpMax, hpMax,
+  };
+  setRingColor(ring);
+  return ring;
+}
+/* Boss 环:单段全圆弧、巨量集中血、无缺口(必须正面击破),击破必出 LUCKY SPIN */
+function makeBossRing(i, R, r0, rr) {
+  const baseHp = Math.ceil(Math.pow(1.22, i - 2));
+  const hp = baseHp * 46;
+  const segs = [{
+    a0: rr() * TAU, len: TAU - .001, hp, maxHp: hp, alive: true, flashT: 0,
+    dv: (1 + i * .6) * 120, dR: 0, dir: 1, phase: 0,
+  }];
+  const ring = {
+    kind: 'arc', boss: true, idx: i, R, n: 1, alive: 1, pr: r0 * 1.7, segs,
+    rot: 0, rotSpeed: .05, breath: 0, breathT: 0,
+    band: r0 * 2.2, broken: false, baseHp, hpSum: hp, hpMax: hp, announced: false,
   };
   setRingColor(ring);
   return ring;
@@ -1073,8 +1255,9 @@ function spawnBall() {
 /* ── 特效生成 ──────────────────────────── */
 function spawnFlyer(p, hue, vx, vy) {
   const f = { x: p.x, y: p.y, vx, vy, r: p.r, col: `hsl(${hue},95%,66%)`, trail: [] };
-  // 流星雨:击飞的粒子概率化作流星,可再撞碎沿途粒子(涌现连锁的源头)
-  if (meta.skills.meteor > 0 && meteorBudget > 0 && rng() < meta.skills.meteor * 0.04) {
+  // 流星雨:击飞的粒子概率化作流星(技能 × 流星潮选牌 × 老虎机增益)
+  const mch = (meta.skills.meteor * .04 + (buffX('meteor') > 1 ? .05 : 0)) * runMods.meteorX * buffX('meteor');
+  if (mch > 0 && meteorBudget > 0 && rng() < mch) {
     f.meteor = 2 + Math.ceil(meta.skills.meteor / 2);
     f.r = p.r * 1.35;
     f.col = `hsl(${hue},100%,78%)`;
@@ -1129,10 +1312,10 @@ function damagePellet(ring, idx, src, mult = 1, noChain = false) {
     damagePellet(ring, (idx + 1) % ring.n, null, mult * .5, true);
     damagePellet(ring, (idx - 1 + ring.n) % ring.n, null, mult * .5, true);
   }
-  // 雷暴:主球撞击计数触发闪电链
-  if (src && src.isBall && meta.skills.storm > 0) {
+  // 雷暴:主球撞击计数触发闪电链(老虎机增益可临时赋予/强化)
+  if (src && src.isBall && (meta.skills.storm > 0 || buffX('storm') > 1)) {
     stormCounter++;
-    if (stormCounter >= Math.max(4, 16 - meta.skills.storm * 2 - runMods.stormFast)) {
+    if (stormCounter >= Math.max(3, Math.round((16 - meta.skills.storm * 2 - runMods.stormFast) / buffX('storm')))) {
       stormCounter = 0;
       lightning(src);
     }
@@ -1152,6 +1335,11 @@ function destroyPellet(ring, idx, src) {
   world.destroyed++; meta.stats.hits++;
   if (src && src.meteor !== undefined) meta.counters.meteorKills++;
   if (p.type === 3) meta.counters.goldKills++;
+  if (p.type === 4) { // 🎰 幸运币
+    spawnWave(p.x, p.y, 48, 6, 130, 6, .5);
+    spawnSparks(p.x, p.y, 48, 18, 420);
+    triggerSlot('lucky');
+  }
   world.combo++; world.comboT = comboWindow(); world.comboPop = 1;
   if (world.combo > world.bestCombo) world.bestCombo = world.combo;
   if (world.combo > meta.stats.bestCombo) meta.stats.bestCombo = world.combo;
@@ -1181,7 +1369,7 @@ function destroyPellet(ring, idx, src) {
 function lightning(b) {
   let cx = b.x, cy = b.y;
   const pts = [[cx, cy]];
-  const jumps = 2 + meta.skills.storm + runMods.stormJump;
+  const jumps = 2 + meta.skills.storm + runMods.stormJump + (buffX('storm') > 1 ? 2 : 0);
   for (let j = 0; j < jumps; j++) {
     let best = null, bd = 320 * 320;
     const cd = Math.hypot(cx, cy);
@@ -1245,9 +1433,10 @@ function shatterRing(ring) {
     }
   }
   ring.hpSum = 0;
-  const bonus = ring.n * 25;
+  // 弧环段数少,奖励按半径计;Boss 4 倍
+  const bonus = Math.round((ring.kind === 'arc' ? ring.R * 1.2 : ring.n * 25) * (ring.boss ? 4 : 1));
   world.score += bonus;
-  awardDust(Math.round(ring.n * .5 * (1 + ring.idx * .6)) * dustMult());
+  awardDust(Math.round((ring.kind === 'arc' ? ring.R * .4 : ring.n * .5) * (1 + ring.idx * .6) * (ring.boss ? 4 : 1)) * dustMult());
   meta.stats.rings++;
   if (world.ringsBroken > meta.stats.deepestRing) meta.stats.deepestRing = world.ringsBroken;
   spawnWave(0, 0, ring.hue, ring.R * .92, ring.R * 2.3, 26, .9);
@@ -1255,8 +1444,9 @@ function shatterRing(ring) {
   flash = Math.min(flash + .45, .7); vigPulse = .6;
   addTrauma(.5 * P.shakeAmp);
   if (P.slowmoTime > 0) smT = P.slowmoTime * runMods.slowmoX;
-  banner(`RING ${ring.idx + 1} SHATTERED`, `+${bonus.toLocaleString()} BONUS`, ring.hue);
+  banner(ring.boss ? '👑 BOSS DOWN' : `RING ${ring.idx + 1} SHATTERED`, `+${bonus.toLocaleString()} BONUS`, ring.hue);
   audio.shatter(ring.idx);
+  if (ring.boss) triggerSlot('boss');
   const se = P.splitEvery > 0 ? Math.max(1, P.splitEvery - meta.ups.split - runMods.splitCut) : 0;
   if (se > 0 && (ring.idx + 1) % se === 0 && world.balls.length < P.maxBalls) {
     spawnBall();
@@ -1431,6 +1621,19 @@ function step(dt) {
     ring.rot += ring.rotSpeed * dt;
     if (ring.breath) ring.breathT += dt;
     for (const seg of ring.segs) if (seg.flashT > 0) seg.flashT -= dt;
+  }
+  // 限时增益倒计时
+  for (let i = buffsActive.length - 1; i >= 0; i--) {
+    buffsActive[i].t -= dt;
+    if (buffsActive[i].t <= 0) buffsActive.splice(i, 1);
+  }
+  // Boss 现身播报
+  const actRing = world.rings[world.act];
+  if (actRing && actRing.boss && !actRing.announced) {
+    actRing.announced = true;
+    banner('⚠ BOSS RING', '封闭壁垒 · 击破必出 LUCKY SPIN', actRing.hue);
+    audio.thump(0);
+    addTrauma(.25 * P.shakeAmp);
   }
   // 按住牵引场:把球群往光标方向引导(穿缺口的核心操作)
   if (pointer.held && P.holdPull > 0) {
@@ -1701,6 +1904,8 @@ function restart(newSeed) {
   trauma = 0; flash = 0; vigPulse = 0; smT = 0; hitStopT = 0;
   runMods = runModsDef();
   stormCounter = 0; melodyPtr = 0;
+  buffsActive = [];
+  slotQueue.length = 0;
   pendingDrafts = 0; activeDraft = null;
   const dr = $('#draft'); if (dr) dr.classList.remove('show');
   ensureRings();
@@ -1817,13 +2022,14 @@ function drawPelletRing(c, ring) {
   // 分桶批量绘制:普通(双色)/装甲/治愈者/黄金 + 损伤暗核覆盖层
   const sh = ring.shape | 0;
   const pa = new Path2D(), pb = new Path2D(), parm = new Path2D(),
-    pheal = new Path2D(), pgold = new Path2D(), ph = new Path2D(),
+    pheal = new Path2D(), pgold = new Path2D(), plucky = new Path2D(), ph = new Path2D(),
     od = new Path2D(), oc = new Path2D();
-  let hasArm = false, hasHeal = false, hasGold = false, hasDent = false, hasCrit = false;
+  let hasArm = false, hasHeal = false, hasGold = false, hasLucky = false, hasDent = false, hasCrit = false;
   for (const p of ring.pellets) {
     if (!p.alive) continue;
     let t;
-    if (p.type === 3) { t = pgold; hasGold = true; }
+    if (p.type === 4) { t = plucky; hasLucky = true; }
+    else if (p.type === 3) { t = pgold; hasGold = true; }
     else if (p.type === 2) { t = pheal; hasHeal = true; }
     else if (p.type === 1) { t = parm; hasArm = true; }
     else t = (p.i & 1) ? pb : pa;
@@ -1853,6 +2059,7 @@ function drawPelletRing(c, ring) {
   if (hasArm) emit(parm, `hsl(${ring.hue},14%,56%)`);
   if (hasHeal) emit(pheal, 'hsl(150,85%,58%)', .72 + .28 * Math.sin(nowSec * 5));
   if (hasGold) emit(pgold, 'hsl(48,100%,64%)', .8 + .2 * Math.sin(nowSec * 7 + ring.idx));
+  if (hasLucky) emit(plucky, `hsl(${(nowSec * 140) % 360},100%,66%)`, .82 + .18 * Math.sin(nowSec * 9)); // 🎰 彩虹脉动
   // 损伤暗核(需要 source-over 才能压暗)
   if (hasDent || hasCrit) {
     c.globalCompositeOperation = 'source-over';
@@ -1870,14 +2077,27 @@ function drawArcRing(c, ring) {
     const a0 = g[0], a1 = g[0] + g[1], R2 = g[2];
     const fr = seg.hp / seg.maxHp;
     if (quality > 0) {
-      c.globalAlpha = clamp(.1 * P.glow, 0, .4);
-      c.strokeStyle = ring.halo; c.lineWidth = ring.pr * 5;
+      c.globalAlpha = clamp((ring.boss ? .16 : .1) * P.glow, 0, .45);
+      c.strokeStyle = ring.halo; c.lineWidth = ring.pr * (ring.boss ? 6.5 : 5);
       c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
     }
     c.globalAlpha = 1;
-    c.strokeStyle = seg.flashT > 0 ? '#fff' : `hsl(${ring.hue},${90 - (1 - fr) * 45}%,${36 + 30 * fr}%)`;
-    c.lineWidth = ring.pr * 2;
-    c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
+    if (ring.boss) {
+      // Boss:色相流转的厚壁 + 白色核脉
+      const bh = (ring.hue + nowSec * 60) % 360;
+      c.strokeStyle = seg.flashT > 0 ? '#fff' : `hsl(${bh},95%,${34 + 26 * fr}%)`;
+      c.lineWidth = ring.pr * 2.6;
+      c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
+      c.globalAlpha = .4 + .25 * Math.sin(nowSec * 5);
+      c.strokeStyle = '#fff';
+      c.lineWidth = ring.pr * .7;
+      c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
+      c.globalAlpha = 1;
+    } else {
+      c.strokeStyle = seg.flashT > 0 ? '#fff' : `hsl(${ring.hue},${90 - (1 - fr) * 45}%,${36 + 30 * fr}%)`;
+      c.lineWidth = ring.pr * 2;
+      c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
+    }
   }
 }
 function drawWorldLayer(c, s) {
@@ -2074,6 +2294,16 @@ function drawHUD(c) {
       c.font = '700 13px Bahnschrift, "Arial Narrow", sans-serif';
       c.fillText(`☀ 超新星就绪 +${ng} ◉(ESC 菜单)`, 18, 112);
     }
+    // 限时增益(右上)
+    c.textAlign = 'right';
+    let by = 18;
+    for (const b of buffsActive) {
+      c.fillStyle = `hsla(45,100%,70%,${b.t < 3 ? .4 + .6 * Math.abs(Math.sin(nowSec * 6)) : .95})`;
+      c.font = '700 13px Bahnschrift, "Arial Narrow", sans-serif';
+      c.fillText(`${b.icon} ${b.name} ×${b.x} · ${Math.ceil(b.t)}s`, W - 14, by);
+      by += 20;
+    }
+    c.textAlign = 'left';
     // 右下角状态
     c.textAlign = 'right';
     c.fillStyle = 'rgba(94,107,140,.75)';
@@ -2439,6 +2669,150 @@ function chooseDraft(i) {
   else { activeDraft = null; $('#draft').classList.remove('show'); }
   saveGame();
 }
+
+/* ── 🎰 LUCKY SPIN 引擎(柏青哥式三转轮) ── */
+const slotQueue = [];
+let slotBusy = false, slotReels = null, slotRAF = 0, slotHeartbeat = 0;
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+function triggerSlot(src) {
+  if (slotQueue.length >= 3) return;
+  slotQueue.push(src);
+  if (!slotBusy) runSlot();
+  else $('#slotQ').textContent = `+${slotQueue.length}`;
+}
+function runSlot() {
+  const src = slotQueue.shift();
+  if (src == null) { $('#slot').classList.remove('show'); slotBusy = false; return; }
+  slotBusy = true;
+  $('#slotQ').textContent = slotQueue.length ? `+${slotQueue.length}` : '';
+  const card = $('#slotCard');
+  card.classList.remove('win', 'reach');
+  $('#slotMsg').textContent = '点击转轮可提前停轮';
+  // 结果用 gameplay RNG(保种子确定性);填充格用 Math.random(纯视觉)
+  const res = [rollSymbol(), rollSymbol(), rollSymbol()];
+  const reach = res[0].k === res[1].k;
+  const LAND = 16;
+  const reels = [];
+  document.querySelectorAll('#slot .reel').forEach((el, i) => {
+    const strip = el.querySelector('.reelStrip');
+    strip.innerHTML = '';
+    for (let k = 0; k <= LAND + 2; k++) {
+      const div = document.createElement('div');
+      div.textContent = k === LAND ? res[i].icon
+        : SLOT_SYMBOLS[(Math.random() * SLOT_SYMBOLS.length) | 0].icon;
+      strip.appendChild(div);
+    }
+    strip.style.transform = 'translateY(0)';
+    el.classList.add('spin');
+    el.classList.remove('stopped');
+    reels.push({
+      el, strip, done: false, early: null, lastCell: 0,
+      start: performance.now(),
+      dur: [1050, 1950, reach ? 4300 : 2750][i],
+    });
+  });
+  const cell = reels[0].strip.children[0].offsetHeight || 88;
+  slotReels = { reels, res, reach, cell, land: LAND, tickAt: 0 };
+  $('#slot').classList.add('show');
+  audio.resume();
+  cancelAnimationFrame(slotRAF);
+  slotRAF = requestAnimationFrame(slotFrame);
+}
+function slotFrame(now) {
+  const S = slotReels;
+  if (!S) return;
+  const D = S.land * S.cell;
+  let allDone = true;
+  S.reels.forEach((r, i) => {
+    if (r.done) return;
+    allDone = false;
+    let pos;
+    if (r.early) {
+      const k = Math.min(1, (now - r.early.t0) / r.early.dur);
+      pos = lerp(r.early.from, D, easeOutCubic(k));
+      if (k >= 1) finishReel(r, i);
+    } else {
+      const k = Math.min(1, (now - r.start) / r.dur);
+      pos = D * easeOutCubic(k);
+      if (k >= 1) finishReel(r, i);
+    }
+    r.strip.style.transform = `translateY(${-pos}px)`;
+    const ci = Math.floor(pos / S.cell);
+    if (ci !== r.lastCell) {
+      r.lastCell = ci;
+      if (now - S.tickAt > 45) { S.tickAt = now; audio.slotTick(); }
+    }
+  });
+  if (!allDone) { slotRAF = requestAnimationFrame(slotFrame); return; }
+  settleSlot();
+}
+function finishReel(r, i) {
+  if (r.done) return;
+  r.done = true;
+  r.el.classList.remove('spin');
+  r.el.classList.add('stopped');
+  const card = $('#slotCard');
+  card.classList.add('shake');
+  setTimeout(() => card.classList.remove('shake'), 170);
+  audio.slotStop();
+  const S = slotReels;
+  // リーチ:前两轮同符号 → 第三轮拉长 + 心跳(柏青哥听牌张力)
+  if (S && i === 1 && S.reach && !S.reels[2].done) {
+    card.classList.add('reach');
+    $('#slotMsg').innerHTML = '<b>リーチ!听牌!</b>';
+    clearInterval(slotHeartbeat);
+    slotHeartbeat = setInterval(() => audio.thump(0), 430);
+  }
+}
+function settleSlot() {
+  clearInterval(slotHeartbeat);
+  const S = slotReels;
+  slotReels = null;
+  const card = $('#slotCard');
+  card.classList.remove('reach');
+  const [a, b, c] = S.res;
+  let tier = 0, sym = a;
+  if (a.k === b.k && b.k === c.k) { tier = 2; sym = a; }
+  else if (a.k === b.k) { tier = 1; sym = a; }
+  else if (b.k === c.k) { tier = 1; sym = b; }
+  else if (a.k === c.k) { tier = 1; sym = a; }
+  const msg = applySlotReward(sym, tier);
+  $('#slotMsg').innerHTML = `<b>${msg}</b>`;
+  if (tier === 2) {
+    card.classList.add('win');
+    flash = Math.min(flash + (sym.k === 'seven' ? .9 : .55), 1);
+    vigPulse = .7;
+    addTrauma((sym.k === 'seven' ? 1 : .6) * P.shakeAmp);
+    if (P.slowmoTime > 0) smT = Math.max(smT, .5);
+    banner(sym.k === 'seven' ? '🎰 JACKPOT 777' : `🎰 ${sym.icon} ${sym.icon} ${sym.icon} 大当たり`, msg.replace(/<[^>]*>/g, ''), 48);
+    audio.fanfare(true);
+    spawnWave(0, 0, 48, 10, 520, 18, .8);
+  } else if (tier === 1) {
+    card.classList.add('win');
+    addTrauma(.25 * P.shakeAmp);
+    audio.fanfare(false);
+  } else {
+    audio.blip(330, .18, .25, 0, 'triangle', 'sine');
+  }
+  updateMenuCurrency();
+  saveGame();
+  setTimeout(() => {
+    card.classList.remove('win');
+    runSlot(); // 队列连转,空了自动收起
+  }, tier === 2 ? 2400 : 1700);
+}
+// 点击转轮:最早未停的转轮 0.24s 内快速落定
+document.querySelectorAll('#slot .reel').forEach(el => {
+  el.addEventListener('pointerdown', () => {
+    const S = slotReels;
+    if (!S) return;
+    const r = S.reels.find(r => !r.done && !r.early);
+    if (!r) return;
+    const now = performance.now();
+    const k = Math.min(1, (now - r.start) / r.dur);
+    r.early = { t0: now, dur: 240, from: S.land * S.cell * easeOutCubic(k) };
+  });
+});
 
 /* ── 菜单系统 ──────────────────────────── */
 const fmtN = n => Math.floor(n).toLocaleString();
@@ -2912,6 +3286,8 @@ window.BALLRU = {
   world, meta,
   get P() { return P; },
   get melody() { return { notes: melodyNotes, ptr: melodyPtr }; },
+  get buffs() { return buffsActive; },
+  slot: triggerSlot,
   save: saveGame, restart, supernova, openMenu,
   dust(n) { meta.dust += n; meta.totalDust += n; updateMenuCurrency(); },
 };
