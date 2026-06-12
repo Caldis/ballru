@@ -323,9 +323,9 @@ body.bare #draft{display:none}
     </div>
   </div>
   <div class="keysHint">
-    <span><kbd>ESC</kbd> 菜单</span><span><kbd>空格</kbd> 暂停</span><span><kbd>R</kbd> 重开</span><span><kbd>C</kbd> 调参台</span>
-    <span><kbd>H</kbd> 录屏模式</span><span><kbd>S</kbd> 按住慢放</span><span><kbd>M</kbd> 静音</span>
-    <span>点击画面 → 冲击脉冲 / 引力井</span>
+    <span><kbd>ESC</kbd> 菜单</span><span><kbd>空格</kbd> 暂停</span><span><kbd>1-3</kbd> 选牌</span><span><kbd>C</kbd> 调参台</span>
+    <span><kbd>H</kbd> 录屏模式</span><span><kbd>S</kbd> 慢放</span>
+    <span>左键点按 → 脉冲/引力井</span><span>左键按住 → 牵引球</span><span>右键 → 斥力爆</span>
   </div>
 </div>
 
@@ -423,6 +423,8 @@ const SCHEMA = [
   // 系统
   { k: 'clickPulse',  g: '系统', label: '点击脉冲',  type: 'toggle', def: true },
   { k: 'pulseForce',  g: '系统', label: '脉冲力度',  min: 0, max: 2000, step: 25, def: 950 },
+  { k: 'holdPull',    g: '系统', label: '按住牵引力', min: 0, max: 1500, step: 25, def: 620 },
+  { k: 'rightForce',  g: '系统', label: '右键斥力',  min: 0, max: 3000, step: 50, def: 1500 },
   { k: 'autoQuality', g: '系统', label: '自动降质',  type: 'toggle', def: true },
 ];
 const GROUP_ORDER = ['物理', '世界', '镜头', '视觉', '音频', '系统'];
@@ -441,9 +443,48 @@ const meta = {
   dust: 0, cores: 0, totalDust: 0,
   skills: { pierce: 0, storm: 0, meteor: 0, well: 0, phase: 0, midas: 0 },
   ups: { dmg: 0, speed: 0, balls: 0, split: 0, comboW: 0, offline: 0 },
+  coreUps: { dustX: 0, dmgX: 0, offCap: 0, meteorCap: 0 },
+  counters: { meteorKills: 0, goldKills: 0, escapes: 0 },
+  ach: {},
   stats: { hits: 0, rings: 0, bestCombo: 0, deepestRing: 0, runs: 0, playMs: 0, supernovas: 0 },
   dustRate: 0,
 };
+/* ◉ 核心熔炉:核心消费的长线乘数(超新星的意义所在) */
+const CORE_UPS = [
+  { k: 'dustX',     icon: '✦', name: '星尘奇点', max: 10, base: 5,  growth: 1.7, desc: l => `星尘获取 ×${(1 + l * .25).toFixed(2)}` },
+  { k: 'dmgX',      icon: '✸', name: '起源之力', max: 10, base: 8,  growth: 1.7, desc: l => `伤害额外 ×${(1 + l * .2).toFixed(2)}` },
+  { k: 'offCap',    icon: '☾', name: '时间晶体', max: 6,  base: 6,  growth: 1.6, desc: l => `离线收益上限 ${8 + l * 4} 小时` },
+  { k: 'meteorCap', icon: '☄', name: '流星核心', max: 5,  base: 10, growth: 1.6, desc: l => `流星每帧转化预算 ${8 + l * 4}` },
+];
+const coreCost = (def, lvl) => Math.round(def.base * Math.pow(def.growth, lvl));
+/* 🏆 成就 */
+const ACH_DEFS = [
+  { id: 'first_ring', name: '初碎',     desc: '击碎第一个环',            test: () => meta.stats.rings >= 1 },
+  { id: 'ring10',     name: '十环行者', desc: '单局抵达 RING 10',        test: () => meta.stats.deepestRing >= 10 },
+  { id: 'ring25',     name: '深空穿行', desc: '单局抵达 RING 25',        test: () => meta.stats.deepestRing >= 25 },
+  { id: 'combo100',   name: '百连击',   desc: '连击 ×100',               test: () => meta.stats.bestCombo >= 100 },
+  { id: 'combo400',   name: '连击之神', desc: '连击 ×400',               test: () => meta.stats.bestCombo >= 400 },
+  { id: 'dust1m',     name: '百万星尘', desc: '累计星尘 1,000,000',      test: () => meta.totalDust >= 1e6 },
+  { id: 'nova1',      name: '超新星',   desc: '完成首次转生',            test: () => meta.stats.supernovas >= 1 },
+  { id: 'nova5',      name: '轮回观测者', desc: '转生 5 次',             test: () => meta.stats.supernovas >= 5 },
+  { id: 'meteor100',  name: '流星雨夜', desc: '流星击碎 100 个粒子',     test: () => meta.counters.meteorKills >= 100 },
+  { id: 'gold50',     name: '黄金猎手', desc: '击碎 50 个黄金粒子',      test: () => meta.counters.goldKills >= 50 },
+  { id: 'balls6',     name: '弹幕全开', desc: '同屏 6 颗球',             test: () => world.balls.length >= 6 },
+  { id: 'escape1',    name: '越狱',     desc: '让球从缺口穿出一个环',    test: () => meta.counters.escapes >= 1 },
+];
+function checkAch() {
+  for (const a of ACH_DEFS) {
+    if (meta.ach[a.id]) continue;
+    let ok = false;
+    try { ok = a.test(); } catch (e) {}
+    if (!ok) continue;
+    meta.ach[a.id] = 1;
+    banner(`🏆 ${a.name}`, a.desc, 48);
+    toast(`🏆 成就解锁:${a.name} — ${a.desc}`);
+    audio.milestone();
+    saveGame();
+  }
+}
 const SKILLS = [
   { k: 'pierce', icon: '⟁', name: '穿甲弹', max: 5, base: 120, desc: l => `撞击有 ${l * 12}% 概率波及相邻粒子` },
   { k: 'storm',  icon: '⌁', name: '雷暴',   max: 5, base: 200, desc: l => `每 ${16 - l * 2} 次撞击释放闪电链(跳 ${2 + l} 段)` },
@@ -461,10 +502,10 @@ const UPS = [
   { k: 'offline', icon: '☾', name: '离线星核', max: 5, base: 250, desc: l => `离线收益效率 ${30 + l * 14}%` },
 ];
 const upCost = (def, lvl) => Math.round(def.base * Math.pow(1.65, lvl));
-const dustMult = () => (1 + meta.skills.midas * 0.2) * (1 + meta.cores * 0.1) * (1 + runMods.midas);
+const dustMult = () => (1 + meta.skills.midas * 0.2) * (1 + meta.cores * 0.1) * (1 + runMods.midas) * (1 + meta.coreUps.dustX * 0.25);
 const comboWindow = () => 1.05 + meta.ups.comboW * 0.15 + runMods.comboW;
 const novaGain = () => world.ringsBroken >= 10 ? Math.floor(Math.pow(world.ringsBroken - 8, 1.5)) : 0;
-const ballDamage = () => Math.pow(1.35, meta.ups.dmg) * (1 + runMods.dmg) * (1 + meta.cores * 0.05);
+const ballDamage = () => Math.pow(1.35, meta.ups.dmg) * (1 + runMods.dmg) * (1 + meta.cores * 0.05) * (1 + meta.coreUps.dmgX * 0.2);
 
 /* ── 本局强化(破环 3 选 1,roguelite 选牌) ── */
 const runModsDef = () => ({ dmg: 0, midas: 0, speed: 0, comboW: 0, stormJump: 0, stormFast: 0, meteorX: 1, wellX: 1, splitCut: 0, slowmoX: 1 });
@@ -487,7 +528,9 @@ const SAVE_KEY = 'ballru.save.v2';
 const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient'];
 let flashOn = true; // 光敏防护(设置项,不进 P)
 let sessionDust = 0, dustWindow = 0, dustWindowT = 0;
+let suppressSave = false; // 清空/导入存档时压制 beforeunload 自动存档,防止覆盖
 function saveGame() {
+  if (suppressSave) return;
   try {
     const set = {}; SET_KEYS.forEach(k => set[k] = P[k]);
     set.flashOn = flashOn;
@@ -510,6 +553,9 @@ function loadGame() {
       meta.dustRate = +j.meta.dustRate || 0;
       Object.keys(meta.skills).forEach(k => meta.skills[k] = Math.max(0, Math.min(5, (j.meta.skills || {})[k] | 0)));
       Object.keys(meta.ups).forEach(k => { const d = UPS.find(u => u.k === k); meta.ups[k] = Math.max(0, Math.min(d ? d.max : 5, (j.meta.ups || {})[k] | 0)); });
+      Object.keys(meta.coreUps).forEach(k => { const d = CORE_UPS.find(u => u.k === k); meta.coreUps[k] = Math.max(0, Math.min(d ? d.max : 10, (j.meta.coreUps || {})[k] | 0)); });
+      Object.assign(meta.counters, j.meta.counters || {});
+      Object.assign(meta.ach, j.meta.ach || {});
       Object.assign(meta.stats, j.meta.stats || {});
     }
     if (j.set) {
@@ -518,7 +564,7 @@ function loadGame() {
     }
     if (j.run && j.run.ringsBroken > 0) lastRun = j.run;
     if (j.lastSeen && meta.dustRate > 0) {
-      const sec = Math.min((Date.now() - j.lastSeen) / 1000, 8 * 3600);
+      const sec = Math.min((Date.now() - j.lastSeen) / 1000, (8 + meta.coreUps.offCap * 4) * 3600);
       if (sec > 90) {
         offline = Math.round(meta.dustRate * sec * (0.3 + meta.ups.offline * 0.14) * dustMult());
         offHours = sec / 3600;
@@ -534,10 +580,12 @@ function exportSave() {
 function importSave(str) {
   const j = JSON.parse(decodeURIComponent(escape(atob(str.trim()))));
   if (!j || j.v !== 2) throw new Error('bad save');
+  suppressSave = true;
   localStorage.setItem(SAVE_KEY, JSON.stringify(j));
   location.reload();
 }
 function wipeSave() {
+  suppressSave = true;
   localStorage.removeItem(SAVE_KEY);
   location.reload();
 }
@@ -756,6 +804,7 @@ const world = {
   combo: 0, comboT: 0, bestCombo: 0, comboPop: 0, act: 0,
 };
 let stormCounter = 0, meteorBudget = 8, novaT = 0, autosaveT = 0, lastSaveAt = 0;
+const pointer = { x: 0, y: 0, down: false, downAt: 0, held: false }; // 鼠标状态机:短按=脉冲,按住=牵引场
 const cam = { z: 1 };
 let shakeX = 0, shakeY = 0, shakeRot = 0, trauma = 0;
 let flash = 0, vigPulse = 0, smT = 0, hitStopT = 0, keySlow = false;
@@ -783,6 +832,10 @@ function makeRing(i) {
   const r0 = P.pelletSize;
   const n = Math.max(8, Math.min(2600, Math.floor(TAU * R / (r0 * 2 * P.pelletSpacing))));
   const rr = mulberry32((seed ^ 0x9E37) + i * 7919);
+  // 环形态:前 3 环固定圆点;之后 18% 弧线刃环,其余粒子环按形态分布(圆点/线条/尖刺)
+  const kindRoll = rr();
+  if (i >= 3 && kindRoll < .18) return makeArcRing(i, R, r0, rr);
+  const shape = i < 3 ? 0 : (kindRoll < .62 ? 0 : kindRoll < .83 ? 1 : 2); // 0 圆点 / 1 线条 / 2 尖刺
   // 对抗成长:血量随环深指数上升,前线推进自然减速 → 可长期挂机
   const baseHp = i < 3 ? 1 : Math.ceil(Math.pow(1.22, i - 2));
   const armorFrac = Math.min(.35, Math.max(0, (i - 4) * .04));
@@ -811,11 +864,89 @@ function makeRing(i) {
   let hpMax = 0;
   for (const p of pellets) hpMax += p.maxHp;
   const ring = {
-    idx: i, R, n, alive: n, pr: r0, pellets, broken: false, miss: 0,
+    kind: 'pellet', shape, idx: i, R, n, alive: n, pr: r0, pellets, broken: false,
     baseHp, hpSum: hpMax, hpMax, healers, healT: 0,
   };
   setRingColor(ring);
   return ring;
+}
+/* 弧线刃环:2-4 段旋转弧形挡板,分段血量,缺口随旋转移动(经典"旋转圆环逃脱"形态) */
+function makeArcRing(i, R, r0, rr) {
+  const baseHp = i < 3 ? 1 : Math.ceil(Math.pow(1.22, i - 2));
+  const segCount = 2 + Math.floor(rr() * 3); // 2-4 段
+  const gapEach = (TAU * (.10 + rr() * .08)) / segCount;
+  const segLen = TAU / segCount - gapEach;
+  const segHp = baseHp * Math.max(8, Math.round(30 / segCount));
+  const segs = [];
+  for (let k = 0; k < segCount; k++) {
+    segs.push({
+      a0: k * TAU / segCount, len: segLen,
+      hp: segHp, maxHp: segHp, alive: true, flashT: 0,
+      dv: (1 + i * .6) * 18,
+    });
+  }
+  const ring = {
+    kind: 'arc', idx: i, R, n: segCount, alive: segCount, pr: r0 * 1.1, segs,
+    rot: rr() * TAU, rotSpeed: (rr() < .5 ? -1 : 1) * (.07 + rr() * .17),
+    broken: false, baseHp, hpSum: segHp * segCount, hpMax: segHp * segCount,
+  };
+  setRingColor(ring);
+  return ring;
+}
+/* 弧段伤害结算 */
+function damageArcSeg(ring, seg, src, mult = 1) {
+  if (!seg.alive || ring.broken) return false;
+  const dealt = Math.min(seg.hp, ballDamage() * mult);
+  seg.hp -= dealt;
+  ring.hpSum = Math.max(0, ring.hpSum - dealt);
+  seg.flashT = .14;
+  awardDust(seg.dv * (dealt / seg.maxHp) * dustMult() * (1 + world.combo * .01));
+  const sx = src ? src.x : Math.cos(ring.rot + seg.a0 + seg.len / 2) * ring.R;
+  const sy = src ? src.y : Math.sin(ring.rot + seg.a0 + seg.len / 2) * ring.R;
+  if (seg.hp > 0) {
+    spawnSparks(sx, sy, ring.hue, 4, 220);
+    audio.wallTick(panOf(sx));
+    return false;
+  }
+  // 弧段崩解:沿弧撒出碎片
+  seg.alive = false; ring.alive--;
+  world.destroyed++; meta.stats.hits++;
+  world.combo++; world.comboT = comboWindow(); world.comboPop = 1;
+  if (world.combo > world.bestCombo) world.bestCombo = world.combo;
+  if (world.combo > meta.stats.bestCombo) meta.stats.bestCombo = world.combo;
+  const gain = 30 + world.combo;
+  world.score += gain;
+  awardDust(seg.dv * .25 * dustMult() * (1 + world.combo * .01));
+  const pieces = Math.min(24, Math.max(6, Math.round(seg.len * ring.R / 26)));
+  for (let k = 0; k < pieces; k++) {
+    const a = ring.rot + seg.a0 + seg.len * (k + .5) / pieces;
+    const px = Math.cos(a) * ring.R, py = Math.sin(a) * ring.R;
+    const sp = 200 + rng() * 320;
+    spawnFlyer({ x: px, y: py, r: ring.pr * .9 }, ring.hue, Math.cos(a) * sp, Math.sin(a) * sp);
+  }
+  spawnWave(sx, sy, ring.hue, 8, 90, 5, .4);
+  if (P.floaters) spawnFloater(sx, sy, '+' + gain);
+  addTrauma(.12 * P.shakeAmp);
+  audio.hit(world.combo - 1, .8, panOf(sx));
+  if (MILESTONES.has(world.combo)) {
+    banner(`×${world.combo} COMBO`, '连击里程碑', 48);
+    audio.milestone();
+    hitStop(P.hitStopMs);
+  }
+  checkAch();
+  if (!ring.broken && ring.alive / ring.n <= P.shatterAt / 100) shatterRing(ring);
+  return true;
+}
+/* 对某角度±半宽范围内的弧段施加伤害(脉冲/引力井用) */
+function damageArcAt(ring, ang, halfW, mult) {
+  let th = ang - ring.rot;
+  th = ((th % TAU) + TAU) % TAU;
+  for (const seg of ring.segs) {
+    if (!seg.alive) continue;
+    let rel = th - seg.a0;
+    rel = ((rel % TAU) + TAU) % TAU;
+    if (rel <= seg.len + halfW || rel >= TAU - halfW) damageArcSeg(ring, seg, null, mult);
+  }
 }
 function ensureRings() {
   while (world.rings.length < world.ringsBroken + 6) world.rings.push(makeRing(world.rings.length));
@@ -859,6 +990,7 @@ function spawnBall() {
   b.vx = Math.cos(a) * ts; b.vy = Math.sin(a) * ts;
   world.balls.push(b);
   spawnWave(b.x, b.y, b.hue, 4, 60, 3, .4);
+  checkAch();
   return b;
 }
 
@@ -942,6 +1074,8 @@ function destroyPellet(ring, idx, src) {
   ring.hpSum = Math.max(0, ring.hpSum - Math.max(0, p.hp));
   if (ring.healers && p.type === 2) ring.healers = ring.healers.filter(i => i !== idx);
   world.destroyed++; meta.stats.hits++;
+  if (src && src.meteor !== undefined) meta.counters.meteorKills++;
+  if (p.type === 3) meta.counters.goldKills++;
   world.combo++; world.comboT = comboWindow(); world.comboPop = 1;
   if (world.combo > world.bestCombo) world.bestCombo = world.combo;
   if (world.combo > meta.stats.bestCombo) meta.stats.bestCombo = world.combo;
@@ -964,6 +1098,7 @@ function destroyPellet(ring, idx, src) {
     audio.milestone();
     hitStop(P.hitStopMs);
   }
+  checkAch();
   if (!ring.broken && ring.alive / ring.n <= P.shatterAt / 100) shatterRing(ring);
 }
 /* 雷暴:从球出发的链式闪电,跳向最近存活粒子 */
@@ -971,12 +1106,12 @@ function lightning(b) {
   let cx = b.x, cy = b.y;
   const pts = [[cx, cy]];
   const jumps = 2 + meta.skills.storm + runMods.stormJump;
-  const hi = Math.min(world.act + 2, world.rings.length - 1);
   for (let j = 0; j < jumps; j++) {
     let best = null, bd = 320 * 320;
-    for (let ri = world.act; ri <= hi; ri++) {
-      const ring = world.rings[ri];
-      if (ring.broken) continue;
+    const cd = Math.hypot(cx, cy);
+    for (const ring of world.rings) {
+      if (ring.broken || ring.kind === 'arc') continue;
+      if (Math.abs(ring.R - cd) > 330) continue;
       const dAng = TAU / ring.n;
       const ca = ((Math.atan2(cy, cx) % TAU) + TAU) % TAU;
       const ci = Math.round(ca / dAng) % ring.n;
@@ -1005,17 +1140,31 @@ function shatterRing(ring) {
   ring.broken = true;
   world.ringsBroken = Math.max(world.ringsBroken, ring.idx + 1);
   let burst = 0;
-  for (const p of ring.pellets) {
-    if (!p.alive) continue;
-    p.alive = false; ring.alive--;
-    if (burst < 420) {
-      const sp = 280 + rng() * 460;
-      const tx = -p.y / ring.R, ty = p.x / ring.R;
-      const tj = (rng() - .5) * 260;
-      spawnFlyer(p, ring.hue, p.x / ring.R * sp + tx * tj, p.y / ring.R * sp + ty * tj);
-      burst++;
-    } else {
-      spawnSparks(p.x, p.y, ring.hue, 1, 320);
+  if (ring.kind === 'arc') {
+    for (const seg of ring.segs) {
+      if (!seg.alive) continue;
+      seg.alive = false; ring.alive--;
+      const pieces = Math.min(28, Math.max(6, Math.round(seg.len * ring.R / 24)));
+      for (let k = 0; k < pieces; k++) {
+        const a = ring.rot + seg.a0 + seg.len * (k + .5) / pieces;
+        const sp = 280 + rng() * 460;
+        spawnFlyer({ x: Math.cos(a) * ring.R, y: Math.sin(a) * ring.R, r: ring.pr * .9 },
+          ring.hue, Math.cos(a) * sp, Math.sin(a) * sp);
+      }
+    }
+  } else {
+    for (const p of ring.pellets) {
+      if (!p.alive) continue;
+      p.alive = false; ring.alive--;
+      if (burst < 420) {
+        const sp = 280 + rng() * 460;
+        const tx = -p.y / ring.R, ty = p.x / ring.R;
+        const tj = (rng() - .5) * 260;
+        spawnFlyer(p, ring.hue, p.x / ring.R * sp + tx * tj, p.y / ring.R * sp + ty * tj);
+        burst++;
+      } else {
+        spawnSparks(p.x, p.y, ring.hue, 1, 320);
+      }
     }
   }
   ring.hpSum = 0;
@@ -1042,6 +1191,7 @@ function shatterRing(ring) {
   ensureRings();
   const nxt = world.rings[getActive()];
   if (nxt) setAccent(nxt.hue);
+  checkAch();
   saveGame();
 }
 
@@ -1064,61 +1214,88 @@ function nearestAlive(ring, ang, maxOff) {
   }
   return -1;
 }
+/* 径向反弹(墙在 ring.R 处,球可能在内侧或外侧) */
+function radialBounce(b, ring, d) {
+  const side = d < ring.R ? -1 : 1; // 法线指向球所在一侧
+  const nx = side * b.x / d, ny = side * b.y / d;
+  const dot = b.vx * nx + b.vy * ny;
+  if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; jitterDir(b); }
+  const dd = side < 0 ? ring.R - ring.pr - b.r - 1 : ring.R + ring.pr + b.r + 1;
+  b.x *= dd / d; b.y *= dd / d;
+}
+/* solid 模式单环碰撞:撞击角附近有存活粒子才反弹,缺口直接穿过(可逃逸!) */
+function collideSolidRing(b, ring, d) {
+  if (Math.abs(d - ring.R) > b.r + ring.pr) return false;
+  // 相位跃迁:概率瞬移到环对侧(速度不变,镜像后自然反向穿行)
+  if (meta.skills.phase > 0 && rng() < meta.skills.phase * .07) {
+    spawnSparks(b.x, b.y, 200, 6, 320);
+    b.x = -b.x; b.y = -b.y;
+    spawnSparks(b.x, b.y, 200, 6, 320);
+    spawnWave(b.x, b.y, 200, 4, 50, 3, .3);
+    audio.blip(1320, .14, .12, panOf(b.x), 'sine', 'triangle');
+    return true;
+  }
+  const win = Math.max(2, Math.ceil((b.r + ring.pr) / (ring.R * TAU / ring.n)) + 1);
+  const ki = nearestAlive(ring, Math.atan2(b.y, b.x), win);
+  if (ki < 0) {
+    // 缺口:穿透。向外穿出记一次"越狱"
+    const outward = b.vx * b.x + b.vy * b.y > 0;
+    if (outward && b.escRing !== ring.idx) {
+      b.escRing = ring.idx;
+      meta.counters.escapes++;
+      if (P.floaters) spawnFloater(b.x, b.y, 'ESCAPE!');
+      audio.blip(880, .18, .2, panOf(b.x), 'triangle', 'sine');
+      checkAch();
+    }
+    return false;
+  }
+  radialBounce(b, ring, d);
+  damagePellet(ring, ki, b);
+  return true;
+}
+/* 弧线刃环碰撞:命中存活弧段反弹,缺口穿过 */
+function collideArcRing(b, ring, d) {
+  if (Math.abs(d - ring.R) > b.r + ring.pr) return false;
+  const pad = (b.r + ring.pr) / ring.R;
+  let th = Math.atan2(b.y, b.x) - ring.rot;
+  th = ((th % TAU) + TAU) % TAU;
+  for (const seg of ring.segs) {
+    if (!seg.alive) continue;
+    let rel = th - seg.a0;
+    rel = ((rel % TAU) + TAU) % TAU;
+    if (rel <= seg.len + pad || rel >= TAU - pad) {
+      radialBounce(b, ring, d);
+      damageArcSeg(ring, seg, b, 1);
+      return true;
+    }
+  }
+  return false;
+}
 function collideBall(b) {
   const d = Math.hypot(b.x, b.y) || .0001;
-  if (P.wallMode === 'solid') {
-    const ring = world.rings[world.act];
-    if (!ring || ring.broken) return;
-    if (d + b.r > ring.R - ring.pr) {
-      // 相位跃迁:概率瞬移到环对侧(速度不变,镜像后自然朝内飞行)
-      if (meta.skills.phase > 0 && rng() < meta.skills.phase * .07) {
-        spawnSparks(b.x, b.y, 200, 6, 320);
-        b.x = -b.x; b.y = -b.y;
-        spawnSparks(b.x, b.y, 200, 6, 320);
-        spawnWave(b.x, b.y, 200, 4, 50, 3, .3);
-        audio.blip(1320, .14, .12, panOf(b.x), 'sine', 'triangle');
+  for (const ring of world.rings) {
+    if (ring.broken) continue;
+    if (Math.abs(d - ring.R) > b.r + ring.pr * 1.3 + 4) continue;
+    if (ring.kind === 'arc') { if (collideArcRing(b, ring, d)) return; continue; }
+    if (P.wallMode === 'solid') { if (collideSolidRing(b, ring, d)) return; continue; }
+    // pellet 模式:逐粒子精确碰撞
+    const dAng = TAU / ring.n;
+    const ca = ((Math.atan2(b.y, b.x) % TAU) + TAU) % TAU;
+    const ci = Math.round(ca / dAng) % ring.n;
+    const span = Math.ceil((b.r + ring.pr * 1.2) / (ring.R * dAng)) + 1;
+    for (let o = -span; o <= span; o++) {
+      const idx = ((ci + o) % ring.n + ring.n) % ring.n;
+      const p = ring.pellets[idx];
+      if (!p.alive) continue;
+      const dx = b.x - p.x, dy = b.y - p.y, rr = b.r + p.r;
+      if (dx * dx + dy * dy < rr * rr) {
+        const dl = Math.sqrt(dx * dx + dy * dy) || .001;
+        const nx = dx / dl, ny = dy / dl;
+        const dot = b.vx * nx + b.vy * ny;
+        if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; jitterDir(b); }
+        b.x = p.x + nx * (rr + .5); b.y = p.y + ny * (rr + .5);
+        damagePellet(ring, idx, b);
         return;
-      }
-      const nx = -b.x / d, ny = -b.y / d;
-      const dot = b.vx * nx + b.vy * ny;
-      if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; jitterDir(b); }
-      const dd = ring.R - ring.pr - b.r - 1;
-      b.x *= dd / d; b.y *= dd / d;
-      const hitAng = Math.atan2(b.y, b.x);
-      const ki = nearestAlive(ring, hitAng, Math.max(6, Math.round(ring.n * .06)));
-      if (ki >= 0) { damagePellet(ring, ki, b); ring.miss = 0; }
-      else {
-        ring.miss++;
-        audio.wallTick(panOf(b.x));
-        if (ring.miss >= 4) {
-          const kk = nearestAlive(ring, hitAng, ring.n);
-          if (kk >= 0) damagePellet(ring, kk, b);
-          ring.miss = 0;
-        }
-      }
-    }
-  } else {
-    for (const ring of world.rings) {
-      if (ring.broken) continue;
-      if (Math.abs(d - ring.R) > b.r + ring.pr * 1.3 + 4) continue;
-      const dAng = TAU / ring.n;
-      const ca = ((Math.atan2(b.y, b.x) % TAU) + TAU) % TAU;
-      const ci = Math.round(ca / dAng) % ring.n;
-      const span = Math.ceil((b.r + ring.pr * 1.2) / (ring.R * dAng)) + 1;
-      for (let o = -span; o <= span; o++) {
-        const idx = ((ci + o) % ring.n + ring.n) % ring.n;
-        const p = ring.pellets[idx];
-        if (!p.alive) continue;
-        const dx = b.x - p.x, dy = b.y - p.y, rr = b.r + p.r;
-        if (dx * dx + dy * dy < rr * rr) {
-          const dl = Math.sqrt(dx * dx + dy * dy) || .001;
-          const nx = dx / dl, ny = dy / dl;
-          const dot = b.vx * nx + b.vy * ny;
-          if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; jitterDir(b); }
-          b.x = p.x + nx * (rr + .5); b.y = p.y + ny * (rr + .5);
-          damagePellet(ring, idx, b);
-          return;
-        }
       }
     }
   }
@@ -1147,10 +1324,27 @@ function ballBall() {
 }
 function step(dt) {
   if (dt <= 0) return;
-  meteorBudget = 8; // 每帧流星转化预算(防雪崩失控)
+  meteorBudget = 8 + meta.coreUps.meteorCap * 4; // 每帧流星转化预算(防雪崩失控,核心可扩容)
   if (world.combo > 0) { world.comboT -= dt; if (world.comboT <= 0) world.combo = 0; }
   world.act = getActive();
   const ts = targetSpeed();
+  // 弧线刃环旋转 + 受击闪白衰减
+  for (const ring of world.rings) {
+    if (ring.broken || ring.kind !== 'arc') continue;
+    ring.rot += ring.rotSpeed * dt;
+    for (const seg of ring.segs) if (seg.flashT > 0) seg.flashT -= dt;
+  }
+  // 按住牵引场:把球群往光标方向引导(穿缺口的核心操作)
+  if (pointer.held && P.holdPull > 0) {
+    const wx = (pointer.x - W / 2 - shakeX) / cam.z;
+    const wy = (pointer.y - H / 2 - shakeY) / cam.z;
+    for (const b of world.balls) {
+      const dx = wx - b.x, dy = wy - b.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const a = P.holdPull * dt * Math.min(1, 900 / d);
+      b.vx += dx / d * a; b.vy += dy / d * a;
+    }
+  }
   // 治愈者:每 0.5s 给左右邻居回血(对抗:必须优先点杀,否则前线被"奶"回去)
   for (let ri = world.act; ri <= Math.min(world.act + 1, world.rings.length - 1); ri++) {
     const ring = world.rings[ri];
@@ -1190,6 +1384,7 @@ function step(dt) {
       for (const ring of world.rings) {
         if (ring.broken || killed >= 46) continue;
         if (Math.abs(Math.hypot(w.x, w.y) - ring.R) > R + 40) continue;
+        if (ring.kind === 'arc') { damageArcAt(ring, Math.atan2(w.y, w.x), R / ring.R, 6 * runMods.wellX); killed += 4; continue; }
         for (let idx = 0; idx < ring.n && killed < 46; idx++) {
           const p = ring.pellets[idx];
           if (!p.alive) continue;
@@ -1245,10 +1440,10 @@ function step(dt) {
     // 流星:沿途撞碎粒子 → 被撞碎的又可能成为新流星(链式涌现)
     if (f.meteor) {
       const fd = Math.hypot(f.x, f.y);
-      const hi = Math.min(world.act + 2, world.rings.length - 1);
-      for (let ri = world.act; ri <= hi && f.meteor; ri++) {
-        const ring = world.rings[ri];
-        if (ring.broken || Math.abs(fd - ring.R) > f.r + ring.pr * 1.3 + 4) continue;
+      for (const ring of world.rings) {
+        if (!f.meteor) break;
+        if (ring.broken || ring.kind === 'arc') continue;
+        if (Math.abs(fd - ring.R) > f.r + ring.pr * 1.3 + 4) continue;
         const dAng = TAU / ring.n;
         const ca = ((Math.atan2(f.y, f.x) % TAU) + TAU) % TAU;
         const ci = Math.round(ca / dAng) % ring.n;
@@ -1318,12 +1513,34 @@ function pulse(mx, my) {
   for (const ring of world.rings) {
     if (ring.broken || hitCnt >= 14) continue;
     if (Math.abs(pd - ring.R) > 150) continue;
+    if (ring.kind === 'arc') { damageArcAt(ring, Math.atan2(wy, wx), 140 / ring.R, 3); hitCnt += 2; continue; }
     for (let idx = 0; idx < ring.n && hitCnt < 14; idx++) {
       const p = ring.pellets[idx];
       if (!p.alive) continue;
       const dx = p.x - wx, dy = p.y - wy;
       if (dx * dx + dy * dy < 140 * 140) { damagePellet(ring, idx, null, 3, true); hitCnt++; }
     }
+  }
+}
+/* 右键斥力爆:把球用力推开 + 锥形清场 */
+function repulse(mx, my) {
+  const wx = (mx - W / 2 - shakeX) / cam.z;
+  const wy = (my - H / 2 - shakeY) / cam.z;
+  spawnWave(wx, wy, 14, 8, 220, 8, .45);
+  addTrauma(.22 * P.shakeAmp);
+  audio.thump(panOf(wx));
+  audio.blip(70, .3, .3, panOf(wx), 'sine', 'sine');
+  for (const b of world.balls) {
+    const dx = b.x - wx, dy = b.y - wy;
+    const d = Math.hypot(dx, dy) || 1;
+    const imp = P.rightForce * Math.exp(-d / 320);
+    b.vx += dx / d * imp; b.vy += dy / d * imp;
+  }
+  for (const f of world.flyers) {
+    const dx = f.x - wx, dy = f.y - wy;
+    const d = Math.hypot(dx, dy) || 1;
+    const imp = P.rightForce * 1.4 * Math.exp(-d / 280);
+    f.vx += dx / d * imp; f.vy += dy / d * imp;
   }
 }
 /* 超新星转生:收获核心,世界重置 */
@@ -1342,6 +1559,7 @@ function supernova() {
   }
   audio.nova();
   banner('SUPERNOVA', `+${g} ◉ 核心已收获`, 48);
+  checkAch();
   saveGame();
 }
 
@@ -1357,8 +1575,9 @@ function rebuild() {
   ensureRings();
   for (const ring of world.rings) {
     if (ring.idx < world.ringsBroken) {
-      ring.broken = true; ring.alive = 0;
-      ring.pellets.forEach(p => p.alive = false);
+      ring.broken = true; ring.alive = 0; ring.hpSum = 0;
+      if (ring.kind === 'arc') ring.segs.forEach(s => s.alive = false);
+      else ring.pellets.forEach(p => p.alive = false);
     }
   }
   world.act = getActive();
@@ -1414,7 +1633,8 @@ function resumeRun(run) {
   for (const ring of world.rings) {
     if (ring.idx < world.ringsBroken) {
       ring.broken = true; ring.alive = 0; ring.hpSum = 0;
-      ring.pellets.forEach(p => p.alive = false);
+      if (ring.kind === 'arc') ring.segs.forEach(s => s.alive = false);
+      else ring.pellets.forEach(p => p.alive = false);
     }
   }
   buildStars();
@@ -1436,16 +1656,24 @@ function camera(rdt) {
   const act = getActive();
   world.act = act;
   let contain = world.rings[act] ? world.rings[act].R : P.baseRadius;
-  if (P.wallMode === 'pellet') {
-    for (const b of world.balls) {
-      const d = Math.hypot(b.x, b.y) + b.r;
-      for (const ring of world.rings) {
-        if (!ring.broken && ring.R - ring.pr > d) {
-          if (ring.R > contain) contain = ring.R;
-          break;
-        }
+  // 包含所有球的最小外环(两种模式都可能穿缺口游走到外环)
+  let minContainIdx = Infinity;
+  for (const b of world.balls) {
+    const d = Math.hypot(b.x, b.y) + b.r;
+    let idx = world.rings.length;
+    for (const ring of world.rings) {
+      if (!ring.broken && ring.R - ring.pr > d) {
+        if (ring.R > contain) contain = ring.R;
+        idx = ring.idx;
+        break;
       }
     }
+    if (idx < minContainIdx) minContainIdx = idx;
+  }
+  // 逃逸即坍缩:全部球都越过的内环在身后爆碎(进度不因穿洞而卡死)
+  if (started && world.balls.length && minContainIdx !== Infinity) {
+    const first = world.rings[act];
+    if (first && !first.broken && first.idx < minContainIdx) shatterRing(first); // 每帧最多一环,错开演出
   }
   let zT = Math.min(W, H) / 2 / ((contain + P.pelletSize * 2.5) * P.camPad);
   if (!started) zT *= 1 + .025 * Math.sin(idleT * .6); // 待机呼吸
@@ -1471,7 +1699,25 @@ function worldTransform(c, s) {
   c.scale(cam.z, cam.z);
 }
 function drawRing(c, ring) {
+  if (ring.kind === 'arc') drawArcRing(c, ring);
+  else drawPelletRing(c, ring);
+}
+/* 粒子几何:0 圆点(填充)/ 1 切向线条 / 2 径向尖刺(描边) */
+function pelletPath(path, p, shape, R) {
+  if (shape === 0) {
+    path.moveTo(p.x + p.r, p.y); path.arc(p.x, p.y, p.r, 0, TAU);
+    return;
+  }
+  let ux, uy;
+  if (shape === 1) { ux = -p.y / R; uy = p.x / R; }
+  else { ux = p.x / R; uy = p.y / R; }
+  const L = p.r * 1.9;
+  path.moveTo(p.x - ux * L, p.y - uy * L);
+  path.lineTo(p.x + ux * L, p.y + uy * L);
+}
+function drawPelletRing(c, ring) {
   // 分桶批量绘制:普通(双色)/装甲/治愈者/黄金 + 损伤暗核覆盖层
+  const sh = ring.shape | 0;
   const pa = new Path2D(), pb = new Path2D(), parm = new Path2D(),
     pheal = new Path2D(), pgold = new Path2D(), ph = new Path2D(),
     od = new Path2D(), oc = new Path2D();
@@ -1483,31 +1729,32 @@ function drawRing(c, ring) {
     else if (p.type === 2) { t = pheal; hasHeal = true; }
     else if (p.type === 1) { t = parm; hasArm = true; }
     else t = (p.i & 1) ? pb : pa;
-    t.moveTo(p.x + p.r, p.y); t.arc(p.x, p.y, p.r, 0, TAU);
-    const hr = p.r * 2.2;
-    ph.moveTo(p.x + hr, p.y); ph.arc(p.x, p.y, hr, 0, TAU);
+    pelletPath(t, p, sh, ring.R);
+    if (sh === 0) {
+      const hr = p.r * 2.2;
+      ph.moveTo(p.x + hr, p.y); ph.arc(p.x, p.y, hr, 0, TAU);
+    } else pelletPath(ph, p, sh, ring.R);
     const fr = p.hp / p.maxHp;
     if (fr <= .34) { const r2 = p.r * .62; oc.moveTo(p.x + r2, p.y); oc.arc(p.x, p.y, r2, 0, TAU); hasCrit = true; }
     else if (fr <= .67) { const r2 = p.r * .52; od.moveTo(p.x + r2, p.y); od.arc(p.x, p.y, r2, 0, TAU); hasDent = true; }
   }
+  const emit = (path, col, dim) => {
+    if (dim != null) c.globalAlpha = dim;
+    if (sh === 0) { c.fillStyle = col; c.fill(path); }
+    else { c.strokeStyle = col; c.lineWidth = ring.pr * 1.05; c.lineCap = 'round'; c.stroke(path); }
+    if (dim != null) c.globalAlpha = 1;
+  };
   if (quality > 0) {
     c.globalAlpha = clamp(.085 * P.glow, 0, .4);
-    c.fillStyle = ring.halo; c.fill(ph);
-  }
-  c.globalAlpha = 1;
-  c.fillStyle = ring.colA; c.fill(pa);
-  c.fillStyle = ring.colB; c.fill(pb);
-  if (hasArm) { c.fillStyle = `hsl(${ring.hue},14%,56%)`; c.fill(parm); }
-  if (hasHeal) {
-    c.globalAlpha = .72 + .28 * Math.sin(nowSec * 5);
-    c.fillStyle = 'hsl(150,85%,58%)'; c.fill(pheal);
+    if (sh === 0) { c.fillStyle = ring.halo; c.fill(ph); }
+    else { c.strokeStyle = ring.halo; c.lineWidth = ring.pr * 2.8; c.lineCap = 'round'; c.stroke(ph); }
     c.globalAlpha = 1;
   }
-  if (hasGold) {
-    c.globalAlpha = .8 + .2 * Math.sin(nowSec * 7 + ring.idx);
-    c.fillStyle = 'hsl(48,100%,64%)'; c.fill(pgold);
-    c.globalAlpha = 1;
-  }
+  emit(pa, ring.colA);
+  emit(pb, ring.colB);
+  if (hasArm) emit(parm, `hsl(${ring.hue},14%,56%)`);
+  if (hasHeal) emit(pheal, 'hsl(150,85%,58%)', .72 + .28 * Math.sin(nowSec * 5));
+  if (hasGold) emit(pgold, 'hsl(48,100%,64%)', .8 + .2 * Math.sin(nowSec * 7 + ring.idx));
   // 损伤暗核(需要 source-over 才能压暗)
   if (hasDent || hasCrit) {
     c.globalCompositeOperation = 'source-over';
@@ -1515,6 +1762,23 @@ function drawRing(c, ring) {
     if (hasCrit) { c.globalAlpha = .78; c.fillStyle = '#06080f'; c.fill(oc); }
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'lighter';
+  }
+}
+function drawArcRing(c, ring) {
+  c.lineCap = 'round';
+  for (const seg of ring.segs) {
+    if (!seg.alive) continue;
+    const a0 = ring.rot + seg.a0, a1 = a0 + seg.len;
+    const fr = seg.hp / seg.maxHp;
+    if (quality > 0) {
+      c.globalAlpha = clamp(.1 * P.glow, 0, .4);
+      c.strokeStyle = ring.halo; c.lineWidth = ring.pr * 5;
+      c.beginPath(); c.arc(0, 0, ring.R, a0, a1); c.stroke();
+    }
+    c.globalAlpha = 1;
+    c.strokeStyle = seg.flashT > 0 ? '#fff' : `hsl(${ring.hue},${90 - (1 - fr) * 45}%,${36 + 30 * fr}%)`;
+    c.lineWidth = ring.pr * 2;
+    c.beginPath(); c.arc(0, 0, ring.R, a0, a1); c.stroke();
   }
 }
 function drawWorldLayer(c, s) {
@@ -1549,8 +1813,8 @@ function drawWorldLayer(c, s) {
     if (ring.broken) continue;
     if (ring.R - ring.pr * 2 > cornerR) break;
     drawn++;
-    if (i <= lo + 4) {
-      drawRing(c, ring);
+    if (i <= lo + 4 || ring.kind === 'arc') {
+      drawRing(c, ring); // 弧环本身就便宜,远景也直接画
     } else {
       c.globalAlpha = .85;
       c.strokeStyle = ring.colA;
@@ -1824,6 +2088,25 @@ function render() {
   // 屏幕空间 HUD
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawHUD(ctx);
+  // 牵引准星(按住时):向心收拢的旋转虚线圈
+  if (pointer.held && started && !paused && !uiHidden) {
+    const k = (nowSec * 1.7) % 1;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'hsl(40,95%,70%)';
+    ctx.lineWidth = 1.6;
+    for (let ring = 0; ring < 2; ring++) {
+      const rr2 = lerp(34, 8, (k + ring * .5) % 1);
+      ctx.globalAlpha = .8 * (1 - (k + ring * .5) % 1);
+      ctx.setLineDash([5, 7]);
+      ctx.lineDashOffset = -nowSec * 60;
+      ctx.beginPath(); ctx.arc(pointer.x, pointer.y, rr2, 0, TAU); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'hsl(40,100%,80%)';
+    ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 2.5, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
 }
 
 /* ── 调参控制台(schema 驱动) ─────────── */
@@ -2152,6 +2435,34 @@ function shopRow(def, store) {
   row.appendChild(btn);
   return row;
 }
+function coreRow(def) {
+  const lvl = meta.coreUps[def.k] | 0;
+  const row = document.createElement('div');
+  row.className = 'shopRow';
+  const pips = '<span class="pips">' + '●'.repeat(lvl) + '<span class="off">' + '●'.repeat(def.max - lvl) + '</span></span>';
+  const desc = lvl >= def.max ? def.desc(lvl) : (lvl > 0 ? `当前:${def.desc(lvl)}<br>下一级:${def.desc(lvl + 1)}` : def.desc(lvl + 1));
+  row.innerHTML = `<div class="shopIcon" style="color:#ffd76a">${def.icon}</div><div><div class="shopName">${def.name}${pips}</div><div class="shopDesc">${desc}</div></div>`;
+  const btn = document.createElement('button');
+  btn.className = 'buyBtn';
+  btn.style.borderColor = '#ffd76a'; btn.style.color = '#ffd76a';
+  if (lvl >= def.max) { btn.textContent = 'MAX'; btn.disabled = true; btn.classList.add('maxed'); }
+  else {
+    const c = coreCost(def, lvl);
+    btn.textContent = `◉ ${fmtN(c)}`;
+    btn.disabled = meta.cores < c;
+    btn.onclick = () => {
+      if (meta.cores < c) return;
+      meta.cores -= c;
+      meta.coreUps[def.k] = lvl + 1;
+      audio.resume(); audio.milestone();
+      toast(`${def.name} → Lv.${lvl + 1}`);
+      saveGame();
+      renderShop(); updateMenuCurrency();
+    };
+  }
+  row.appendChild(btn);
+  return row;
+}
 function renderShop() {
   const el = $('#shopBody');
   el.innerHTML = '';
@@ -2160,6 +2471,8 @@ function renderShop() {
   SKILLS.forEach(d => el.appendChild(shopRow(d, meta.skills)));
   el.appendChild(sec('强化 · 数值成长'));
   UPS.forEach(d => el.appendChild(shopRow(d, meta.ups)));
+  el.appendChild(sec('◉ 核心熔炉 · 超新星长线'));
+  CORE_UPS.forEach(d => el.appendChild(coreRow(d)));
 }
 function setRow(label, ctrl) {
   const row = document.createElement('div');
@@ -2228,6 +2541,7 @@ function renderStats() {
   const el = $('#statsBody');
   const s = meta.stats;
   const hrs = Math.floor(s.playMs / 3600000), mins = Math.floor(s.playMs / 60000) % 60;
+  const unlocked = ACH_DEFS.filter(a => meta.ach[a.id]).length;
   el.innerHTML = '<div class="statGrid">' + [
     [fmtN(meta.totalDust), '累计星尘'],
     [fmtN(meta.cores), '核心 ◉'],
@@ -2237,9 +2551,17 @@ function renderStats() {
     ['×' + fmtN(s.bestCombo), '最高连击'],
     [fmtN(s.supernovas), '超新星转生'],
     [`${hrs}h ${mins}m`, '游玩时长'],
-    [fmtN(s.runs), '总局数'],
-    [fmtN(world.ringsBroken), '本局破环'],
-  ].map(([v, l]) => `<div class="statBox"><b>${v}</b><span>${l}</span></div>`).join('') + '</div>';
+    [fmtN(meta.counters.meteorKills), '流星击碎'],
+    [fmtN(meta.counters.escapes), '越狱次数'],
+  ].map(([v, l]) => `<div class="statBox"><b>${v}</b><span>${l}</span></div>`).join('') + '</div>'
+  + `<div class="shopSec">🏆 成就 ${unlocked}/${ACH_DEFS.length}</div>`
+  + ACH_DEFS.map(a => {
+      const on = !!meta.ach[a.id];
+      return `<div class="shopRow" style="opacity:${on ? 1 : .42}">
+        <div class="shopIcon">${on ? '🏆' : '🔒'}</div>
+        <div><div class="shopName">${a.name}</div><div class="shopDesc">${a.desc}</div></div>
+        <div class="shopDesc">${on ? '已解锁' : ''}</div></div>`;
+    }).join('');
 }
 function renderSavePage() {
   const el = $('#saveBody');
@@ -2350,11 +2672,26 @@ addEventListener('keydown', e => {
   }
 });
 addEventListener('keyup', e => { if (e.code === 'KeyS') keySlow = false; });
+/* 鼠标:左键短按=脉冲/引力井;左键按住=牵引场;右键=斥力爆 */
 cv.addEventListener('pointerdown', e => {
   if (!started || paused) return;
   audio.resume();
-  if (P.clickPulse) pulse(e.clientX, e.clientY);
+  pointer.x = e.clientX; pointer.y = e.clientY;
+  if (e.button === 2) { repulse(e.clientX, e.clientY); return; }
+  if (e.button !== 0) return;
+  pointer.down = true; pointer.downAt = performance.now(); pointer.held = false;
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
 });
+addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; });
+addEventListener('pointerup', e => {
+  if (e.button !== 0 || !pointer.down) return;
+  pointer.down = false;
+  const wasHeld = pointer.held;
+  pointer.held = false;
+  // 短按(<180ms)→ 脉冲;长按已经施加了牵引,松开不再触发脉冲
+  if (!wasHeld && started && !paused && P.clickPulse) pulse(e.clientX, e.clientY);
+});
+cv.addEventListener('contextmenu', e => e.preventDefault());
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => showPage('home'));
 addEventListener('beforeunload', saveGame);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
@@ -2391,6 +2728,8 @@ function frame(now) {
   }
   if (keySlow) tsc = Math.min(tsc, .18);
   if (hitStopT > 0) { hitStopT -= rdt; tsc = 0; }
+  // 按住超过 180ms 进入牵引模式
+  if (pointer.down && !pointer.held && now - pointer.downAt > 180) pointer.held = true;
   // 超新星演出:慢镜收束后开新局
   if (novaT > 0) {
     tsc = Math.min(tsc, .22);
