@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>BALLRU · 环爆模拟</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23ffb454' stroke-width='3' stroke-dasharray='9 4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff3e0'/%3E%3C/svg%3E">
 <style>
@@ -14,7 +14,9 @@
   --dim:#5e6b8c;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden;background:#04060e}
+html,body{height:100%;overflow:hidden;background:#04060e;overscroll-behavior:none}
+.tBody,.pageBody{touch-action:pan-y}
+button,select{-webkit-tap-highlight-color:transparent}
 body{
   font-family:Bahnschrift,'Avenir Next Condensed','Arial Narrow',system-ui,sans-serif;
   color:var(--tx);-webkit-font-smoothing:antialiased;user-select:none;
@@ -265,6 +267,18 @@ body.bare #draft{display:none}
 .dCard .dd{font-size:10.5px;color:var(--dim);line-height:1.4}
 .dCard .dk{font-size:9px;color:var(--dim);margin-top:6px;letter-spacing:.15em}
 
+/* ── 小屏适配 ───────────────────────────── */
+@media (max-width:600px){
+  .dRow{flex-wrap:wrap;justify-content:center}
+  .dCard{width:calc(33.3% - 6px);min-width:96px;padding:8px 9px}
+  .dCard .dk{display:none}
+  .keysHint{display:none}
+  .menuWrap .mark{font-size:clamp(38px,13vw,68px)}
+  .menuCard{max-height:58vh}
+  #tuner{width:min(94vw,304px)}
+  #tunerTab{top:8px;right:8px}
+}
+
 /* ── 弹出层 / Toast ─────────────────────── */
 .pop{
   position:fixed;inset:0;z-index:40;display:none;place-items:center;
@@ -385,6 +399,7 @@ const SCHEMA = [
   { k: 'ballSpeed',    g: '物理', label: '基础球速',   min: 120,  max: 2200, step: 10,   def: 620 },
   { k: 'speedGain',    g: '物理', label: '破环增速%',  min: 0,    max: 30,   step: 1,    def: 3 },
   { k: 'ballRadius',   g: '物理', label: '主球半径',   min: 5,    max: 30,   step: 1,    def: 11 },
+  { k: 'hitbox',       g: '物理', label: '碰撞体积%',  min: 0.3,  max: 1.5,  step: 0.05, def: 0.8 },
   { k: 'bounceJitter', g: '物理', label: '反弹散射',   min: 0,    max: 0.6,  step: 0.01, def: 0.12 },
   { k: 'gravity',      g: '物理', label: '重力',       min: -600, max: 1500, step: 25,   def: 0 },
   { k: 'wallMode',     g: '物理', label: '碰撞模式',   type: 'select', opts: [['solid','实墙弹射'],['pellet','粒子穿击']], def: 'solid' },
@@ -415,6 +430,7 @@ const SCHEMA = [
   { k: 'hud',         g: '视觉', label: '战况 HUD',    type: 'toggle', def: true },
   // 音频
   { k: 'volume',    g: '音频', label: '主音量',     min: 0,    max: 1,   step: 0.01, def: 0.7, change: 'volume' },
+  { k: 'melody',    g: '音频', label: '旋律模式',   type: 'select', opts: [['scale','自由音阶'],['twinkle','小星星'],['ode','欢乐颂'],['canon','卡农'],['jasmine','茉莉花'],['fur','致爱丽丝'],['custom','自定义简谱']], def: 'scale', change: 'melody' },
   { k: 'scaleName', g: '音频', label: '音阶',       type: 'select', opts: [['pentatonic','五声音阶'],['major','大调'],['minor','小调'],['blues','布鲁斯'],['japan','都节(和风)']], def: 'pentatonic' },
   { k: 'noteDecay', g: '音频', label: '音符衰减s',  min: 0.05, max: 0.8, step: 0.01, def: 0.22 },
   { k: 'delayWet',  g: '音频', label: '空间回声',   min: 0,    max: 0.8, step: 0.01, def: 0.3, change: 'wet' },
@@ -429,6 +445,7 @@ const SCHEMA = [
 ];
 const GROUP_ORDER = ['物理', '世界', '镜头', '视觉', '音频', '系统'];
 const DEF = {}; SCHEMA.forEach(s => DEF[s.k] = s.def);
+DEF.customMelody = '1 1 5 5 6 6 5 4 4 3 3 2 2 1'; // 自定义简谱(无滑杆,设置页编辑)
 let P = { ...DEF };
 
 const PRESETS = [
@@ -525,7 +542,7 @@ const DRAFTS = [
 ];
 
 const SAVE_KEY = 'ballru.save.v2';
-const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient'];
+const SET_KEYS = ['volume', 'scaleName', 'shakeAmp', 'clickPulse', 'hud', 'autoQuality', 'floaters', 'ambient', 'melody', 'customMelody', 'hitbox'];
 let flashOn = true; // 光敏防护(设置项,不进 P)
 let sessionDust = 0, dustWindow = 0, dustWindowT = 0;
 let suppressSave = false; // 清空/导入存档时压制 beforeunload 自动存档,防止覆盖
@@ -642,6 +659,37 @@ const SCALES = {
   blues: [0, 3, 5, 6, 7, 10],
   japan: [0, 2, 3, 7, 8],
 };
+/* ── 音乐模式:撞击逐音符演奏旋律(越快歌越快) ──
+ * 简谱记法:1-7=音级,+/- 升降八度(可叠加),# 升半音,0 跳过。全部公版旋律。 */
+const MELODIES = {
+  twinkle: '1 1 5 5 6 6 5 4 4 3 3 2 2 1 5 5 4 4 3 3 2 5 5 4 4 3 3 2 1 1 5 5 6 6 5 4 4 3 3 2 2 1',
+  ode: '3 3 4 5 5 4 3 2 1 1 2 3 3 2 2 3 3 4 5 5 4 3 2 1 1 2 3 2 1 1 2 2 3 1 2 3 4 3 1 2 3 4 3 2 1 2 5- 3',
+  canon: '3 2 1 7- 6- 5- 6- 7- 1 2 3 2 1 2 3 4 5 4 3 2 1 7- 1 2 3 1 5 4 3 2 1 7- 6- 7- 1',
+  jasmine: '3 3 5 6 1+ 1+ 6 5 5 6 5 3 3 5 6 1+ 1+ 6 5 5 6 5 5 5 5 3 5 6 6 5 3 2 3 5 2 3 2 1 6- 1 2 3 2 1 2 1 6- 5-',
+  fur: '3+ #2+ 3+ #2+ 3+ 7 2+ 1+ 6 1 3 6 7 3 #5 7 1+ 3 3+ #2+ 3+ #2+ 3+ 7 2+ 1+ 6 1 3 6 7 3 1+ 7 6',
+};
+const DEG_SEMI = [0, 2, 4, 5, 7, 9, 11];
+function parseJianpu(str) {
+  const notes = [];
+  for (const tok of String(str || '').trim().split(/\s+/)) {
+    const m = /^(#?)([1-7])([+-]*)$/.exec(tok);
+    if (!m) continue;
+    let semi = DEG_SEMI[+m[2] - 1] + (m[1] ? 1 : 0);
+    for (const c of m[3]) semi += c === '+' ? 12 : -12;
+    notes.push(semi);
+  }
+  return notes;
+}
+let melodyNotes = null, melodyPtr = 0;
+function rebuildMelody() {
+  if (P.melody === 'scale') { melodyNotes = null; }
+  else {
+    const src = P.melody === 'custom' ? P.customMelody : MELODIES[P.melody];
+    const ns = parseJianpu(src);
+    melodyNotes = ns.length ? ns : null;
+  }
+  melodyPtr = 0;
+}
 const audio = {
   ok: false, lastHit: 0, amb: null,
   init() {
@@ -692,10 +740,16 @@ const audio = {
     const t = this.c.currentTime;
     if (t - this.lastHit < .022) return;
     this.lastHit = t;
-    const sc = SCALES[P.scaleName] || SCALES.pentatonic;
-    const L = sc.length;
-    const oct = Math.floor(idx / L) % 3;
-    const f = 220 * Math.pow(2, (sc[idx % L] + 12 * oct) / 12);
+    let f;
+    if (melodyNotes) {
+      // 音乐模式:逐音符推进旋律,撞得越快歌越快
+      f = 261.63 * Math.pow(2, melodyNotes[melodyPtr++ % melodyNotes.length] / 12);
+    } else {
+      const sc = SCALES[P.scaleName] || SCALES.pentatonic;
+      const L = sc.length;
+      const oct = Math.floor(idx / L) % 3;
+      f = 220 * Math.pow(2, (sc[idx % L] + 12 * oct) / 12);
+    }
     this.blip(f, .22 + .5 * vel, P.noteDecay, pan);
   },
   wallTick(pan) { this.blip(150, .06, .06, pan, 'triangle', 'sine'); },
@@ -870,28 +924,50 @@ function makeRing(i) {
   setRingColor(ring);
   return ring;
 }
-/* 弧线刃环:2-4 段旋转弧形挡板,分段血量,缺口随旋转移动(经典"旋转圆环逃脱"形态) */
+/* 弧线刃环:旋转弧形挡板,三种变体 —— 单层 / 双层反向旋转 / 呼吸开合 */
 function makeArcRing(i, R, r0, rr) {
   const baseHp = i < 3 ? 1 : Math.ceil(Math.pow(1.22, i - 2));
-  const segCount = 2 + Math.floor(rr() * 3); // 2-4 段
-  const gapEach = (TAU * (.10 + rr() * .08)) / segCount;
-  const segLen = TAU / segCount - gapEach;
-  const segHp = baseHp * Math.max(8, Math.round(30 / segCount));
+  const v = rr(); // <.4 单层 | <.7 双层反转 | 其余 呼吸开合
+  const layers = v >= .4 && v < .7 ? 2 : 1;
+  const breath = v >= .7 ? (.5 + rr() * .7) : 0;
   const segs = [];
-  for (let k = 0; k < segCount; k++) {
-    segs.push({
-      a0: k * TAU / segCount, len: segLen,
-      hp: segHp, maxHp: segHp, alive: true, flashT: 0,
-      dv: (1 + i * .6) * 18,
-    });
+  for (let L = 0; L < layers; L++) {
+    const segCount = 2 + Math.floor(rr() * (layers === 2 ? 2 : 3));
+    const gapEach = (TAU * (.10 + rr() * .08)) / segCount;
+    const segLen = TAU / segCount - gapEach;
+    const segHp = baseHp * Math.max(8, Math.round(30 / (segCount * layers)));
+    const dR = layers === 2 ? (L === 0 ? -1 : 1) * r0 * 1.7 : 0;
+    const a00 = rr() * TAU;
+    for (let k = 0; k < segCount; k++) {
+      segs.push({
+        a0: a00 + k * TAU / segCount, len: segLen,
+        hp: segHp, maxHp: segHp, alive: true, flashT: 0,
+        dv: (1 + i * .6) * 18 / layers,
+        dR, dir: L === 0 ? 1 : -1, phase: k * 2.1,
+      });
+    }
   }
+  let hpMax = 0;
+  segs.forEach(s => hpMax += s.maxHp);
   const ring = {
-    kind: 'arc', idx: i, R, n: segCount, alive: segCount, pr: r0 * 1.1, segs,
+    kind: 'arc', idx: i, R, n: segs.length, alive: segs.length, pr: r0 * 1.1, segs,
     rot: rr() * TAU, rotSpeed: (rr() < .5 ? -1 : 1) * (.07 + rr() * .17),
-    broken: false, baseHp, hpSum: segHp * segCount, hpMax: segHp * segCount,
+    breath, breathT: 0,
+    band: r0 * 1.5 + (layers === 2 ? r0 * 1.7 : 0),
+    broken: false, baseHp, hpSum: hpMax, hpMax,
   };
   setRingColor(ring);
   return ring;
+}
+/* 弧段当前几何:[起始角, 弧长, 半径] —— 统一处理层偏移/反向旋转/呼吸缩放 */
+function segGeom(ring, seg) {
+  let a0 = seg.a0 + ring.rot * (seg.dir || 1), len = seg.len;
+  if (ring.breath) {
+    const k = .58 + .42 * Math.sin(ring.breathT * ring.breath + (seg.phase || 0));
+    a0 += seg.len * (1 - k) / 2;
+    len = seg.len * k;
+  }
+  return [a0, len, ring.R + (seg.dR || 0)];
 }
 /* 弧段伤害结算 */
 function damageArcSeg(ring, seg, src, mult = 1) {
@@ -901,8 +977,9 @@ function damageArcSeg(ring, seg, src, mult = 1) {
   ring.hpSum = Math.max(0, ring.hpSum - dealt);
   seg.flashT = .14;
   awardDust(seg.dv * (dealt / seg.maxHp) * dustMult() * (1 + world.combo * .01));
-  const sx = src ? src.x : Math.cos(ring.rot + seg.a0 + seg.len / 2) * ring.R;
-  const sy = src ? src.y : Math.sin(ring.rot + seg.a0 + seg.len / 2) * ring.R;
+  const gg = segGeom(ring, seg);
+  const sx = src ? src.x : Math.cos(gg[0] + gg[1] / 2) * gg[2];
+  const sy = src ? src.y : Math.sin(gg[0] + gg[1] / 2) * gg[2];
   if (seg.hp > 0) {
     spawnSparks(sx, sy, ring.hue, 4, 220);
     audio.wallTick(panOf(sx));
@@ -917,10 +994,10 @@ function damageArcSeg(ring, seg, src, mult = 1) {
   const gain = 30 + world.combo;
   world.score += gain;
   awardDust(seg.dv * .25 * dustMult() * (1 + world.combo * .01));
-  const pieces = Math.min(24, Math.max(6, Math.round(seg.len * ring.R / 26)));
+  const pieces = Math.min(24, Math.max(6, Math.round(gg[1] * gg[2] / 26)));
   for (let k = 0; k < pieces; k++) {
-    const a = ring.rot + seg.a0 + seg.len * (k + .5) / pieces;
-    const px = Math.cos(a) * ring.R, py = Math.sin(a) * ring.R;
+    const a = gg[0] + gg[1] * (k + .5) / pieces;
+    const px = Math.cos(a) * gg[2], py = Math.sin(a) * gg[2];
     const sp = 200 + rng() * 320;
     spawnFlyer({ x: px, y: py, r: ring.pr * .9 }, ring.hue, Math.cos(a) * sp, Math.sin(a) * sp);
   }
@@ -939,13 +1016,12 @@ function damageArcSeg(ring, seg, src, mult = 1) {
 }
 /* 对某角度±半宽范围内的弧段施加伤害(脉冲/引力井用) */
 function damageArcAt(ring, ang, halfW, mult) {
-  let th = ang - ring.rot;
-  th = ((th % TAU) + TAU) % TAU;
   for (const seg of ring.segs) {
     if (!seg.alive) continue;
-    let rel = th - seg.a0;
+    const g = segGeom(ring, seg);
+    let rel = ang - g[0];
     rel = ((rel % TAU) + TAU) % TAU;
-    if (rel <= seg.len + halfW || rel >= TAU - halfW) damageArcSeg(ring, seg, null, mult);
+    if (rel <= g[1] + halfW || rel >= TAU - halfW) damageArcSeg(ring, seg, null, mult);
   }
 }
 function ensureRings() {
@@ -1144,11 +1220,12 @@ function shatterRing(ring) {
     for (const seg of ring.segs) {
       if (!seg.alive) continue;
       seg.alive = false; ring.alive--;
-      const pieces = Math.min(28, Math.max(6, Math.round(seg.len * ring.R / 24)));
+      const gg = segGeom(ring, seg);
+      const pieces = Math.min(28, Math.max(6, Math.round(gg[1] * gg[2] / 24)));
       for (let k = 0; k < pieces; k++) {
-        const a = ring.rot + seg.a0 + seg.len * (k + .5) / pieces;
+        const a = gg[0] + gg[1] * (k + .5) / pieces;
         const sp = 280 + rng() * 460;
-        spawnFlyer({ x: Math.cos(a) * ring.R, y: Math.sin(a) * ring.R, r: ring.pr * .9 },
+        spawnFlyer({ x: Math.cos(a) * gg[2], y: Math.sin(a) * gg[2], r: ring.pr * .9 },
           ring.hue, Math.cos(a) * sp, Math.sin(a) * sp);
       }
     }
@@ -1214,18 +1291,35 @@ function nearestAlive(ring, ang, maxOff) {
   }
   return -1;
 }
-/* 径向反弹(墙在 ring.R 处,球可能在内侧或外侧) */
-function radialBounce(b, ring, d) {
-  const side = d < ring.R ? -1 : 1; // 法线指向球所在一侧
+/* 径向反弹(墙在半径 R 处,球可能在内侧或外侧) */
+function radialBounce(b, R, pr, d) {
+  const side = d < R ? -1 : 1; // 法线指向球所在一侧
   const nx = side * b.x / d, ny = side * b.y / d;
   const dot = b.vx * nx + b.vy * ny;
   if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; jitterDir(b); }
-  const dd = side < 0 ? ring.R - ring.pr - b.r - 1 : ring.R + ring.pr + b.r + 1;
+  const dd = side < 0 ? R - pr - b.r - 1 : R + pr + b.r + 1;
   b.x *= dd / d; b.y *= dd / d;
 }
-/* solid 模式单环碰撞:撞击角附近有存活粒子才反弹,缺口直接穿过(可逃逸!) */
+/* 球穿缺口逃逸的奖励(钻空子 = 爽感来源,要大方) */
+function rewardEscape(b, ring) {
+  if (b.escRing === ring.idx) return;
+  b.escRing = ring.idx;
+  meta.counters.escapes++;
+  const eg = Math.round(8 * (ring.idx + 1) * dustMult());
+  awardDust(eg);
+  world.score += 60;
+  if (P.floaters) spawnFloater(b.x, b.y, `ESCAPE! +${eg}`);
+  spawnSparks(b.x, b.y, 48, 10, 360);
+  audio.blip(880, .2, .2, panOf(b.x), 'triangle', 'sine');
+  audio.blip(1320, .16, .22, panOf(b.x), 'sine', 'triangle', .07);
+  addTrauma(.08 * P.shakeAmp);
+  checkAch();
+}
+/* solid 模式单环碰撞:对最近存活粒子做"精确弧距"判定 ——
+ * 距离 > (球r+粒r)×碰撞体积% 即视为缺口穿过(P.hitbox 越小越容易钻空子) */
 function collideSolidRing(b, ring, d) {
-  if (Math.abs(d - ring.R) > b.r + ring.pr) return false;
+  const reach = (b.r + ring.pr) * P.hitbox;
+  if (Math.abs(d - ring.R) > reach) return false;
   // 相位跃迁:概率瞬移到环对侧(速度不变,镜像后自然反向穿行)
   if (meta.skills.phase > 0 && rng() < meta.skills.phase * .07) {
     spawnSparks(b.x, b.y, 200, 6, 320);
@@ -1235,47 +1329,50 @@ function collideSolidRing(b, ring, d) {
     audio.blip(1320, .14, .12, panOf(b.x), 'sine', 'triangle');
     return true;
   }
-  const win = Math.max(2, Math.ceil((b.r + ring.pr) / (ring.R * TAU / ring.n)) + 1);
-  const ki = nearestAlive(ring, Math.atan2(b.y, b.x), win);
-  if (ki < 0) {
-    // 缺口:穿透。向外穿出记一次"越狱"
-    const outward = b.vx * b.x + b.vy * b.y > 0;
-    if (outward && b.escRing !== ring.idx) {
-      b.escRing = ring.idx;
-      meta.counters.escapes++;
-      if (P.floaters) spawnFloater(b.x, b.y, 'ESCAPE!');
-      audio.blip(880, .18, .2, panOf(b.x), 'triangle', 'sine');
-      checkAch();
+  const ang = Math.atan2(b.y, b.x);
+  const spacing = ring.R * TAU / ring.n;
+  const win = Math.ceil(reach / spacing) + 2;
+  const ki = nearestAlive(ring, ang, win);
+  if (ki >= 0) {
+    const p = ring.pellets[ki];
+    let dAng = Math.abs(ang - p.ang) % TAU;
+    if (dAng > Math.PI) dAng = TAU - dAng;
+    if (dAng * ring.R <= (b.r + p.r) * P.hitbox) {
+      radialBounce(b, ring.R, ring.pr, d);
+      damagePellet(ring, ki, b);
+      return true;
     }
-    return false;
   }
-  radialBounce(b, ring, d);
-  damagePellet(ring, ki, b);
-  return true;
+  // 缺口:穿透。向外穿出记一次"越狱"并奖励
+  if (b.vx * b.x + b.vy * b.y > 0) rewardEscape(b, ring);
+  return false;
 }
-/* 弧线刃环碰撞:命中存活弧段反弹,缺口穿过 */
+/* 弧线刃环碰撞:逐段(支持层偏移/反向旋转/呼吸开合)判定,缺口穿过 */
 function collideArcRing(b, ring, d) {
-  if (Math.abs(d - ring.R) > b.r + ring.pr) return false;
-  const pad = (b.r + ring.pr) / ring.R;
-  let th = Math.atan2(b.y, b.x) - ring.rot;
-  th = ((th % TAU) + TAU) % TAU;
+  const reach = (b.r + ring.pr) * P.hitbox;
+  let touched = false;
   for (const seg of ring.segs) {
     if (!seg.alive) continue;
-    let rel = th - seg.a0;
+    const g = segGeom(ring, seg);
+    if (Math.abs(d - g[2]) > reach) continue;
+    touched = true;
+    const pad = reach / g[2];
+    let rel = Math.atan2(b.y, b.x) - g[0];
     rel = ((rel % TAU) + TAU) % TAU;
-    if (rel <= seg.len + pad || rel >= TAU - pad) {
-      radialBounce(b, ring, d);
+    if (rel <= g[1] + pad || rel >= TAU - pad) {
+      radialBounce(b, g[2], ring.pr, d);
       damageArcSeg(ring, seg, b, 1);
       return true;
     }
   }
+  if (touched && b.vx * b.x + b.vy * b.y > 0) rewardEscape(b, ring);
   return false;
 }
 function collideBall(b) {
   const d = Math.hypot(b.x, b.y) || .0001;
   for (const ring of world.rings) {
     if (ring.broken) continue;
-    if (Math.abs(d - ring.R) > b.r + ring.pr * 1.3 + 4) continue;
+    if (Math.abs(d - ring.R) > b.r + (ring.band || ring.pr * 1.3) + 4) continue;
     if (ring.kind === 'arc') { if (collideArcRing(b, ring, d)) return; continue; }
     if (P.wallMode === 'solid') { if (collideSolidRing(b, ring, d)) return; continue; }
     // pellet 模式:逐粒子精确碰撞
@@ -1287,7 +1384,7 @@ function collideBall(b) {
       const idx = ((ci + o) % ring.n + ring.n) % ring.n;
       const p = ring.pellets[idx];
       if (!p.alive) continue;
-      const dx = b.x - p.x, dy = b.y - p.y, rr = b.r + p.r;
+      const dx = b.x - p.x, dy = b.y - p.y, rr = (b.r + p.r) * P.hitbox;
       if (dx * dx + dy * dy < rr * rr) {
         const dl = Math.sqrt(dx * dx + dy * dy) || .001;
         const nx = dx / dl, ny = dy / dl;
@@ -1328,10 +1425,11 @@ function step(dt) {
   if (world.combo > 0) { world.comboT -= dt; if (world.comboT <= 0) world.combo = 0; }
   world.act = getActive();
   const ts = targetSpeed();
-  // 弧线刃环旋转 + 受击闪白衰减
+  // 弧线刃环旋转 / 呼吸 + 受击闪白衰减
   for (const ring of world.rings) {
     if (ring.broken || ring.kind !== 'arc') continue;
     ring.rot += ring.rotSpeed * dt;
+    if (ring.breath) ring.breathT += dt;
     for (const seg of ring.segs) if (seg.flashT > 0) seg.flashT -= dt;
   }
   // 按住牵引场:把球群往光标方向引导(穿缺口的核心操作)
@@ -1602,7 +1700,7 @@ function restart(newSeed) {
   });
   trauma = 0; flash = 0; vigPulse = 0; smT = 0; hitStopT = 0;
   runMods = runModsDef();
-  stormCounter = 0;
+  stormCounter = 0; melodyPtr = 0;
   pendingDrafts = 0; activeDraft = null;
   const dr = $('#draft'); if (dr) dr.classList.remove('show');
   ensureRings();
@@ -1768,17 +1866,18 @@ function drawArcRing(c, ring) {
   c.lineCap = 'round';
   for (const seg of ring.segs) {
     if (!seg.alive) continue;
-    const a0 = ring.rot + seg.a0, a1 = a0 + seg.len;
+    const g = segGeom(ring, seg);
+    const a0 = g[0], a1 = g[0] + g[1], R2 = g[2];
     const fr = seg.hp / seg.maxHp;
     if (quality > 0) {
       c.globalAlpha = clamp(.1 * P.glow, 0, .4);
       c.strokeStyle = ring.halo; c.lineWidth = ring.pr * 5;
-      c.beginPath(); c.arc(0, 0, ring.R, a0, a1); c.stroke();
+      c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
     }
     c.globalAlpha = 1;
     c.strokeStyle = seg.flashT > 0 ? '#fff' : `hsl(${ring.hue},${90 - (1 - fr) * 45}%,${36 + 30 * fr}%)`;
     c.lineWidth = ring.pr * 2;
-    c.beginPath(); c.arc(0, 0, ring.R, a0, a1); c.stroke();
+    c.beginPath(); c.arc(0, 0, R2, a0, a1); c.stroke();
   }
 }
 function drawWorldLayer(c, s) {
@@ -2122,6 +2221,7 @@ const CHANGE_FX = {
   ambient: v => audio.setAmbient(v),
   recolor: () => recolorRings(),
   stars: () => buildStars(),
+  melody: () => rebuildMelody(),
 };
 const ctrlRefs = {};
 function applyParam(s, v) {
@@ -2513,6 +2613,27 @@ function renderSettings() {
   sel.value = P.scaleName;
   sel.onchange = () => { P.scaleName = sel.value; syncTuner('scaleName'); saveGame(); };
   el.appendChild(setRow('音阶', sel));
+  // 音乐模式:旋律选择 + 自定义简谱
+  const msel = document.createElement('select');
+  [['scale', '自由音阶'], ['twinkle', '小星星'], ['ode', '欢乐颂'], ['canon', '卡农'], ['jasmine', '茉莉花'], ['fur', '致爱丽丝'], ['custom', '自定义简谱']].forEach(([v, t]) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = t; msel.appendChild(o);
+  });
+  msel.value = P.melody;
+  msel.onchange = () => { P.melody = msel.value; rebuildMelody(); syncTuner('melody'); saveGame(); };
+  el.appendChild(setRow('旋律模式', msel));
+  const mta = document.createElement('textarea');
+  mta.className = 'saveTa';
+  mta.style.height = '52px';
+  mta.placeholder = '自定义简谱:1-7 音级,+/- 八度,# 升半音,如 1 1 5 5 6 6 5';
+  mta.value = P.customMelody || '';
+  mta.spellcheck = false;
+  mta.onchange = () => {
+    P.customMelody = mta.value;
+    if (P.melody === 'custom') rebuildMelody();
+    saveGame();
+    toast(`简谱已保存(${parseJianpu(mta.value).length} 个音)`);
+  };
+  el.appendChild(mta);
   el.appendChild(setRow('震屏强度', mkSlider(() => P.shakeAmp, v => { P.shakeAmp = v; syncTuner('shakeAmp'); saveGame(); }, 0, 2, .05)));
   const qsel = document.createElement('select');
   [['auto', '自动'], ['2', '高'], ['1', '中'], ['0', '低']].forEach(([v, t]) => {
@@ -2672,11 +2793,21 @@ addEventListener('keydown', e => {
   }
 });
 addEventListener('keyup', e => { if (e.code === 'KeyS') keySlow = false; });
-/* 鼠标:左键短按=脉冲/引力井;左键按住=牵引场;右键=斥力爆 */
+/* 鼠标/触控:左键(单指)短按=脉冲/引力井;按住=牵引场;右键(双指点按)=斥力爆 */
+const touchIds = new Set();
 cv.addEventListener('pointerdown', e => {
   if (!started || paused) return;
   audio.resume();
   pointer.x = e.clientX; pointer.y = e.clientY;
+  if (e.pointerType === 'touch') {
+    touchIds.add(e.pointerId);
+    if (touchIds.size >= 2) {
+      // 双指点按 = 斥力爆(移动端的"右键")
+      pointer.down = false; pointer.held = false;
+      repulse(e.clientX, e.clientY);
+      return;
+    }
+  }
   if (e.button === 2) { repulse(e.clientX, e.clientY); return; }
   if (e.button !== 0) return;
   pointer.down = true; pointer.downAt = performance.now(); pointer.held = false;
@@ -2684,6 +2815,7 @@ cv.addEventListener('pointerdown', e => {
 });
 addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; });
 addEventListener('pointerup', e => {
+  touchIds.delete(e.pointerId);
   if (e.button !== 0 || !pointer.down) return;
   pointer.down = false;
   const wasHeld = pointer.held;
@@ -2691,6 +2823,7 @@ addEventListener('pointerup', e => {
   // 短按(<180ms)→ 脉冲;长按已经施加了牵引,松开不再触发脉冲
   if (!wasHeld && started && !paused && P.clickPulse) pulse(e.clientX, e.clientY);
 });
+addEventListener('pointercancel', e => { touchIds.delete(e.pointerId); pointer.down = false; pointer.held = false; });
 cv.addEventListener('contextmenu', e => e.preventDefault());
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => showPage('home'));
 addEventListener('beforeunload', saveGame);
@@ -2765,6 +2898,7 @@ function frame(now) {
 
 /* ── 启动 ──────────────────────────────── */
 const off = loadGame();      // 先读档:设置/技能/离线收益都在世界构建前生效
+rebuildMelody();
 resize();
 ensureRings();
 cam.z = fitZoom();
@@ -2777,6 +2911,7 @@ renderOffline(off.offline, off.offHours);
 window.BALLRU = {
   world, meta,
   get P() { return P; },
+  get melody() { return { notes: melodyNotes, ptr: melodyPtr }; },
   save: saveGame, restart, supernova, openMenu,
   dust(n) { meta.dust += n; meta.totalDust += n; updateMenuCurrency(); },
 };
